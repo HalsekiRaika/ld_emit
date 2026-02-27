@@ -60,20 +60,21 @@ impl ContextFetcher {
     }
 
     fn fetch_from_network(&self, url: &str) -> Result<String, LDBuildError> {
-        let response = ureq::get(url)
-            .set("Accept", "application/ld+json")
+        let body = ureq::get(url)
+            .header("Accept", "application/ld+json")
             .call()
+            .map_err(|e| LDBuildError::Network {
+                url: url.to_string(),
+                source: Box::new(e),
+            })?
+            .body_mut()
+            .read_to_string()
             .map_err(|e| LDBuildError::Network {
                 url: url.to_string(),
                 source: Box::new(e),
             })?;
 
-        response
-            .into_string()
-            .map_err(|e| LDBuildError::Network {
-                url: url.to_string(),
-                source: Box::new(e),
-            })
+        Ok(body)
     }
 
     fn write_cache(path: &Path, content: &str) -> Result<(), std::io::Error> {
