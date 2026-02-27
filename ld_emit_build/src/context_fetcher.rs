@@ -90,10 +90,8 @@ mod tests {
     use super::*;
 
     fn temp_cache_dir(suffix: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ld_emit_test_{}_{suffix}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ld_emit_test_{}_{suffix}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

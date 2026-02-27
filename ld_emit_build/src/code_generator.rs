@@ -1,4 +1,4 @@
-use crate::code_utils::{to_snake_case, to_pascal_case, is_reserved, dedup_method_name};
+use crate::code_utils::{dedup_method_name, is_reserved, to_pascal_case, to_snake_case};
 use crate::error::LDBuildError;
 use crate::models::*;
 use proc_macro2::{Ident, Span, TokenStream};
@@ -57,7 +57,8 @@ impl CodeGenerator {
         let type_alias = Self::generate_type_alias(&infos);
         let unit_type_constants = Self::generate_unit_type_constants(contexts, &infos);
         let iri_constants = Self::generate_iri_constants(contexts, &infos);
-        let extension_traits = Self::generate_extension_traits(contexts, &infos, expose_values, renames)?;
+        let extension_traits =
+            Self::generate_extension_traits(contexts, &infos, expose_values, renames)?;
 
         // Token-based generation for context serializer impls
         let context_serializer_impls = Self::generate_context_serializer_impls(contexts, &infos);
@@ -169,11 +170,12 @@ impl CodeGenerator {
         contexts: &[(String, ParsedContext)],
         infos: &[ContextInfo],
     ) -> TokenStream {
-        let modules = contexts.iter().enumerate().map(|(i, (_, parsed))| {
-            let info = &infos[i];
-            let module_name = &info.module_name;
+        let modules =
+            contexts.iter().enumerate().map(|(i, (_, parsed))| {
+                let info = &infos[i];
+                let module_name = &info.module_name;
 
-            let consts: Vec<TokenStream> = parsed.terms.iter().filter_map(|term| {
+                let consts: Vec<TokenStream> = parsed.terms.iter().filter_map(|term| {
                 if let TermKind::SimpleTerm { iri } = &term.kind {
                     let const_name = format_ident!("{}", to_snake_case(&term.name).to_uppercase());
                     let term_name = term.name.as_str();
@@ -190,12 +192,12 @@ impl CodeGenerator {
                 }
             }).collect();
 
-            quote! {
-                pub mod #module_name {
-                    #(#consts)*
+                quote! {
+                    pub mod #module_name {
+                        #(#consts)*
+                    }
                 }
-            }
-        });
+            });
 
         quote! { #(#modules)* }
     }
@@ -210,7 +212,8 @@ impl CodeGenerator {
         // Within a single context, if two terms produce the same SCREAMING_SNAKE_CASE name
         // (e.g. "Image" (SimpleTerm) and "image" (ExtendedTerm) both → "IMAGE"),
         // keep the SimpleTerm and skip the ExtendedTerm.
-        let mut skip_set: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        let mut skip_set: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
 
         for (ctx_idx, (_, parsed)) in contexts.iter().enumerate() {
             let mut intra_names: HashMap<String, Vec<usize>> = HashMap::new();
@@ -227,9 +230,9 @@ impl CodeGenerator {
 
             for indices in intra_names.values() {
                 if indices.len() > 1 {
-                    let simple_idx = indices.iter().find(|&&i| {
-                        matches!(&parsed.terms[i].kind, TermKind::SimpleTerm { .. })
-                    });
+                    let simple_idx = indices
+                        .iter()
+                        .find(|&&i| matches!(&parsed.terms[i].kind, TermKind::SimpleTerm { .. }));
                     if let Some(&winner) = simple_idx {
                         for &idx in indices {
                             if idx != winner {
@@ -380,7 +383,8 @@ impl CodeGenerator {
                 let term = &parsed.terms[term_idx];
 
                 // Apply dedup prefix if needed
-                let final_name = if method_name_counts.get(resolved_name).copied().unwrap_or(0) > 1 {
+                let final_name = if method_name_counts.get(resolved_name).copied().unwrap_or(0) > 1
+                {
                     dedup_method_name(ctx_name, resolved_name)
                 } else {
                     resolved_name.clone()
@@ -422,7 +426,9 @@ impl CodeGenerator {
                             }
                         });
                     }
-                    TermKind::ExtendedTerm { id, type_coercion, .. } => {
+                    TermKind::ExtendedTerm {
+                        id, type_coercion, ..
+                    } => {
                         let json_key = term.name.as_str();
                         let doc = format!("Set the `{}` property (`{}`).", json_key, id);
 
@@ -438,7 +444,10 @@ impl CodeGenerator {
 
                         if matches!(type_coercion, Some(TypeCoercion::Id)) {
                             let nested_ident = format_ident!("{}_object", final_name);
-                            let nested_doc = format!("Set the `{}` property as a nested object (`{}`).", json_key, id);
+                            let nested_doc = format!(
+                                "Set the `{}` property as a nested object (`{}`).",
+                                json_key, id
+                            );
 
                             trait_methods.push(quote! {
                                 #[doc = #nested_doc]
@@ -455,7 +464,10 @@ impl CodeGenerator {
                         if expose_values.iter().any(|ev| ev.expanded_iri == *iri) {
                             let with_ident = format_ident!("{}_with", final_name);
                             let json_key = term.name.as_str();
-                            let doc = format!("Set the `{}` property with a direct value (`{}`).", json_key, iri);
+                            let doc = format!(
+                                "Set the `{}` property with a direct value (`{}`).",
+                                json_key, iri
+                            );
 
                             trait_methods.push(quote! {
                                 #[doc = #doc]
@@ -490,9 +502,7 @@ impl CodeGenerator {
         match &term.kind {
             TermKind::ExtendedTerm { .. } => true,
             TermKind::KeywordAlias { .. } => true,
-            TermKind::SimpleTerm { iri } => {
-                expose_values.iter().any(|ev| ev.expanded_iri == *iri)
-            }
+            TermKind::SimpleTerm { iri } => expose_values.iter().any(|ev| ev.expanded_iri == *iri),
             _ => false,
         }
     }
@@ -560,18 +570,20 @@ impl CodeGenerator {
                 quote! { ld_emit::serde_json::Value::String(#s.to_string()) }
             }
             serde_json::Value::Array(arr) => {
-                let elements: Vec<TokenStream> = arr.iter()
-                    .map(Self::json_value_to_tokens)
-                    .collect();
+                let elements: Vec<TokenStream> =
+                    arr.iter().map(Self::json_value_to_tokens).collect();
                 quote! { ld_emit::serde_json::Value::Array(vec![#(#elements),*]) }
             }
             serde_json::Value::Object(map) => {
-                let inserts: Vec<TokenStream> = map.iter().map(|(k, v)| {
-                    let val_tokens = Self::json_value_to_tokens(v);
-                    quote! {
-                        __map.insert(#k.to_string(), #val_tokens);
-                    }
-                }).collect();
+                let inserts: Vec<TokenStream> = map
+                    .iter()
+                    .map(|(k, v)| {
+                        let val_tokens = Self::json_value_to_tokens(v);
+                        quote! {
+                            __map.insert(#k.to_string(), #val_tokens);
+                        }
+                    })
+                    .collect();
                 quote! {
                     {
                         let mut __map = ld_emit::serde_json::Map::new();
@@ -616,8 +628,7 @@ mod tests {
 
     /// Convert generated TokenStream to formatted Rust code via prettyplease.
     fn format_tokens(tokens: TokenStream) -> String {
-        let file: syn::File = syn::parse2(tokens)
-            .expect("Generated code should be valid Rust");
+        let file: syn::File = syn::parse2(tokens).expect("Generated code should be valid Rust");
         prettyplease::unparse(&file)
     }
 
@@ -723,7 +734,9 @@ mod tests {
         let contexts = make_simple_context();
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
-        assert!(code.contains("pub struct ActivityStreams<S = ()>(::core::marker::PhantomData<S>);"));
+        assert!(
+            code.contains("pub struct ActivityStreams<S = ()>(::core::marker::PhantomData<S>);")
+        );
     }
 
     #[test]
@@ -743,7 +756,9 @@ mod tests {
         // ActivityStreams forwards HasSecurityV1
         assert!(code.contains("impl<S: HasSecurityV1> HasSecurityV1 for ActivityStreams<S> {}"));
         // SecurityV1 forwards HasActivityStreams
-        assert!(code.contains("impl<S: HasActivityStreams> HasActivityStreams for SecurityV1<S> {}"));
+        assert!(
+            code.contains("impl<S: HasActivityStreams> HasActivityStreams for SecurityV1<S> {}")
+        );
     }
 
     #[test]
@@ -770,7 +785,11 @@ mod tests {
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
         assert!(code.contains("pub mod activity_streams"));
-        assert!(code.contains("pub const NOTE: ld_emit::TypeConstant"), "Code:\n{}", code);
+        assert!(
+            code.contains("pub const NOTE: ld_emit::TypeConstant"),
+            "Code:\n{}",
+            code
+        );
         assert!(code.contains("https://www.w3.org/ns/activitystreams#Note"));
     }
 
@@ -908,14 +927,12 @@ mod tests {
                     "name": "https://schema.org/name",
                     "url": {"@id": "https://schema.org/url", "@type": "@id"}
                 })),
-                terms: vec![
-                    TermDefinition {
-                        name: "name".to_string(),
-                        kind: TermKind::SimpleTerm {
-                            iri: "https://schema.org/name".to_string(),
-                        },
+                terms: vec![TermDefinition {
+                    name: "name".to_string(),
+                    kind: TermKind::SimpleTerm {
+                        iri: "https://schema.org/name".to_string(),
                     },
-                ],
+                }],
                 original_json: serde_json::json!({
                     "name": "https://schema.org/name",
                     "url": {"@id": "https://schema.org/url", "@type": "@id"}
@@ -1047,9 +1064,10 @@ mod tests {
                 original_json: serde_json::json!({}),
             },
         )];
-        let renames = vec![
-            RenameDirective { from: "type".to_string(), to: "kind".to_string() },
-        ];
+        let renames = vec![RenameDirective {
+            from: "type".to_string(),
+            to: "kind".to_string(),
+        }];
         let tokens = CodeGenerator::generate(&contexts, &[], &renames).unwrap();
         let _code = format_tokens(tokens);
     }
@@ -1064,11 +1082,15 @@ mod tests {
                     terms: vec![
                         TermDefinition {
                             name: "id".to_string(),
-                            kind: TermKind::KeywordAlias { keyword: "@id".to_string() },
+                            kind: TermKind::KeywordAlias {
+                                keyword: "@id".to_string(),
+                            },
                         },
                         TermDefinition {
                             name: "type".to_string(),
-                            kind: TermKind::KeywordAlias { keyword: "@type".to_string() },
+                            kind: TermKind::KeywordAlias {
+                                keyword: "@type".to_string(),
+                            },
                         },
                         TermDefinition {
                             name: "Note".to_string(),
@@ -1154,14 +1176,12 @@ mod tests {
                         "toot": "http://joinmastodon.org/ns#",
                         "discoverable": "toot:discoverable"
                     })),
-                    terms: vec![
-                        TermDefinition {
-                            name: "discoverable".to_string(),
-                            kind: TermKind::SimpleTerm {
-                                iri: "http://joinmastodon.org/ns#discoverable".to_string(),
-                            },
+                    terms: vec![TermDefinition {
+                        name: "discoverable".to_string(),
+                        kind: TermKind::SimpleTerm {
+                            iri: "http://joinmastodon.org/ns#discoverable".to_string(),
                         },
-                    ],
+                    }],
                     original_json: serde_json::json!({
                         "toot": "http://joinmastodon.org/ns#",
                         "discoverable": "toot:discoverable"
@@ -1177,9 +1197,10 @@ mod tests {
                 expanded_iri: "http://joinmastodon.org/ns#discoverable".to_string(),
             },
         ];
-        let renames = vec![
-            RenameDirective { from: "type".to_string(), to: "kind".to_string() },
-        ];
+        let renames = vec![RenameDirective {
+            from: "type".to_string(),
+            to: "kind".to_string(),
+        }];
         let tokens = CodeGenerator::generate(&contexts, &expose, &renames).unwrap();
         let _code = format_tokens(tokens);
     }
@@ -1213,11 +1234,15 @@ mod tests {
         // prettyplease renders #[doc = "..."] as /// comments
         assert!(
             code.contains("///JSON-LD type constant: `https://www.w3.org/ns/activitystreams#Note`"),
-            "Note should have doc attribute with IRI. Code:\n{}", code
+            "Note should have doc attribute with IRI. Code:\n{}",
+            code
         );
         assert!(
-            code.contains("///JSON-LD type constant: `https://www.w3.org/ns/activitystreams#Create`"),
-            "Create should have doc attribute with IRI. Code:\n{}", code
+            code.contains(
+                "///JSON-LD type constant: `https://www.w3.org/ns/activitystreams#Create`"
+            ),
+            "Create should have doc attribute with IRI. Code:\n{}",
+            code
         );
     }
 
@@ -1228,11 +1253,13 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("///JSON-LD type constant: `https://www.w3.org/ns/activitystreams#Note`"),
-            "Note should have doc attribute. Code:\n{}", code
+            "Note should have doc attribute. Code:\n{}",
+            code
         );
         assert!(
             code.contains("///JSON-LD type constant: `https://w3id.org/security#Key`"),
-            "CryptographicKey should have doc attribute. Code:\n{}", code
+            "CryptographicKey should have doc attribute. Code:\n{}",
+            code
         );
     }
 
@@ -1243,11 +1270,13 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("term_name: \"Note\""),
-            "Note should have term_name: \"Note\". Code:\n{}", code
+            "Note should have term_name: \"Note\". Code:\n{}",
+            code
         );
         assert!(
             code.contains("term_name: \"Create\""),
-            "Create should have term_name: \"Create\". Code:\n{}", code
+            "Create should have term_name: \"Create\". Code:\n{}",
+            code
         );
     }
 
@@ -1261,16 +1290,14 @@ mod tests {
                 "ctx_a".to_string(),
                 ParsedContext {
                     source: ContextSource::Url("https://example.com/a".to_string()),
-                    terms: vec![
-                        TermDefinition {
-                            name: "name".to_string(),
-                            kind: TermKind::ExtendedTerm {
-                                id: "https://example.com/a#name".to_string(),
-                                type_coercion: None,
-                                container: None,
-                            },
+                    terms: vec![TermDefinition {
+                        name: "name".to_string(),
+                        kind: TermKind::ExtendedTerm {
+                            id: "https://example.com/a#name".to_string(),
+                            type_coercion: None,
+                            container: None,
                         },
-                    ],
+                    }],
                     original_json: serde_json::json!("https://example.com/a"),
                 },
             ),
@@ -1278,16 +1305,14 @@ mod tests {
                 "ctx_b".to_string(),
                 ParsedContext {
                     source: ContextSource::Url("https://example.com/b".to_string()),
-                    terms: vec![
-                        TermDefinition {
-                            name: "name".to_string(),
-                            kind: TermKind::ExtendedTerm {
-                                id: "https://example.com/b#name".to_string(),
-                                type_coercion: None,
-                                container: None,
-                            },
+                    terms: vec![TermDefinition {
+                        name: "name".to_string(),
+                        kind: TermKind::ExtendedTerm {
+                            id: "https://example.com/b#name".to_string(),
+                            type_coercion: None,
+                            container: None,
                         },
-                    ],
+                    }],
                     original_json: serde_json::json!("https://example.com/b"),
                 },
             ),
@@ -1297,17 +1322,20 @@ mod tests {
         // Both should have prefixed constant names
         assert!(
             code.contains("CTX_A_NAME"),
-            "Should have CTX_A_NAME for dedup. Code:\n{}", code
+            "Should have CTX_A_NAME for dedup. Code:\n{}",
+            code
         );
         assert!(
             code.contains("CTX_B_NAME"),
-            "Should have CTX_B_NAME for dedup. Code:\n{}", code
+            "Should have CTX_B_NAME for dedup. Code:\n{}",
+            code
         );
         // Should NOT have unprefixed NAME
         // (Check that there's no standalone `NAME` without a prefix)
         assert!(
             !code.contains("pub const NAME"),
-            "Should not have unprefixed NAME. Code:\n{}", code
+            "Should not have unprefixed NAME. Code:\n{}",
+            code
         );
     }
 
@@ -1319,16 +1347,19 @@ mod tests {
         // Single context, all names unique → no prefix
         assert!(
             code.contains("pub const NOTE"),
-            "Should have unprefixed NOTE. Code:\n{}", code
+            "Should have unprefixed NOTE. Code:\n{}",
+            code
         );
         assert!(
             code.contains("pub const ACTOR"),
-            "Should have unprefixed ACTOR. Code:\n{}", code
+            "Should have unprefixed ACTOR. Code:\n{}",
+            code
         );
         // Should NOT have prefixed versions
         assert!(
             !code.contains("ACTIVITY_STREAMS_NOTE"),
-            "Should not have prefixed ACTIVITY_STREAMS_NOTE. Code:\n{}", code
+            "Should not have prefixed ACTIVITY_STREAMS_NOTE. Code:\n{}",
+            code
         );
     }
 
@@ -1353,7 +1384,8 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("Extension trait for activity_streams context properties."),
-            "Extension trait should have doc attribute. Code:\n{}", code
+            "Extension trait should have doc attribute. Code:\n{}",
+            code
         );
     }
 
@@ -1363,8 +1395,11 @@ mod tests {
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
         assert!(
-            code.contains("Set the `actor` property (`https://www.w3.org/ns/activitystreams#actor`)."),
-            "Property setter should have doc with IRI. Code:\n{}", code
+            code.contains(
+                "Set the `actor` property (`https://www.w3.org/ns/activitystreams#actor`)."
+            ),
+            "Property setter should have doc with IRI. Code:\n{}",
+            code
         );
     }
 
@@ -1375,7 +1410,8 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("Set the `id` property (`@id`)."),
-            "Keyword alias setter should have doc with alias name and keyword. Code:\n{}", code
+            "Keyword alias setter should have doc with alias name and keyword. Code:\n{}",
+            code
         );
     }
 
@@ -1386,7 +1422,8 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("Set the `actor` property as a nested object"),
-            "Nested object setter should have doc. Code:\n{}", code
+            "Nested object setter should have doc. Code:\n{}",
+            code
         );
     }
 
@@ -1400,7 +1437,8 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("Set the `content` property with a direct value"),
-            "Expose value setter should have doc. Code:\n{}", code
+            "Expose value setter should have doc. Code:\n{}",
+            code
         );
     }
 
@@ -1444,11 +1482,13 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("fn ctx_a_name("),
-            "Should have prefixed method ctx_a_name. Code:\n{}", code
+            "Should have prefixed method ctx_a_name. Code:\n{}",
+            code
         );
         assert!(
             code.contains("fn ctx_b_name("),
-            "Should have prefixed method ctx_b_name. Code:\n{}", code
+            "Should have prefixed method ctx_b_name. Code:\n{}",
+            code
         );
     }
 
@@ -1460,11 +1500,13 @@ mod tests {
         // Single context → no prefixes needed
         assert!(
             code.contains("fn actor("),
-            "Should have unprefixed actor method. Code:\n{}", code
+            "Should have unprefixed actor method. Code:\n{}",
+            code
         );
         assert!(
             !code.contains("fn activity_streams_actor("),
-            "Should not have prefixed method. Code:\n{}", code
+            "Should not have prefixed method. Code:\n{}",
+            code
         );
     }
 
@@ -1478,7 +1520,9 @@ mod tests {
                 source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
-                    kind: TermKind::KeywordAlias { keyword: "@type".to_string() },
+                    kind: TermKind::KeywordAlias {
+                        keyword: "@type".to_string(),
+                    },
                 }],
                 original_json: serde_json::json!({}),
             },
@@ -1491,25 +1535,30 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("fn kind("),
-            "Should use renamed method. Code:\n{}", code
+            "Should use renamed method. Code:\n{}",
+            code
         );
         assert!(
             !code.contains("fn r#type("),
-            "Should not use r#type. Code:\n{}", code
+            "Should not use r#type. Code:\n{}",
+            code
         );
         // JSON key should be the alias name "type" (not the primitive keyword "@type")
         assert!(
             code.contains("\"type\""),
-            "JSON key should be alias name. Code:\n{}", code
+            "JSON key should be alias name. Code:\n{}",
+            code
         );
         // @type alias should use TypeConstant signature, not impl Serialize
         assert!(
             code.contains("TypeConstant"),
-            "@type alias method should use TypeConstant signature. Code:\n{}", code
+            "@type alias method should use TypeConstant signature. Code:\n{}",
+            code
         );
         assert!(
             code.contains("type_def_aliased"),
-            "@type alias method should delegate to type_def_aliased. Code:\n{}", code
+            "@type alias method should delegate to type_def_aliased. Code:\n{}",
+            code
         );
     }
 
@@ -1521,7 +1570,9 @@ mod tests {
                 source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
-                    kind: TermKind::KeywordAlias { keyword: "@type".to_string() },
+                    kind: TermKind::KeywordAlias {
+                        keyword: "@type".to_string(),
+                    },
                 }],
                 original_json: serde_json::json!({}),
             },
@@ -1530,15 +1581,18 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("fn r#type("),
-            "KeywordAlias 'type' should auto-resolve to r#type. Code:\n{}", code
+            "KeywordAlias 'type' should auto-resolve to r#type. Code:\n{}",
+            code
         );
         assert!(
             code.contains("ld_emit::TypeConstant") && !code.contains("dyn ld_emit::TypeConstant"),
-            "@type alias should use ld_emit::TypeConstant without dyn. Code:\n{}", code
+            "@type alias should use ld_emit::TypeConstant without dyn. Code:\n{}",
+            code
         );
         assert!(
             code.contains("type_def_aliased"),
-            "@type alias should delegate to type_def_aliased. Code:\n{}", code
+            "@type alias should delegate to type_def_aliased. Code:\n{}",
+            code
         );
     }
 
@@ -1550,7 +1604,9 @@ mod tests {
                 source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
-                    kind: TermKind::KeywordAlias { keyword: "@type".to_string() },
+                    kind: TermKind::KeywordAlias {
+                        keyword: "@type".to_string(),
+                    },
                 }],
                 original_json: serde_json::json!({}),
             },
@@ -1564,7 +1620,11 @@ mod tests {
         match result.unwrap_err() {
             LDBuildError::CodeGen { term, message } => {
                 assert_eq!(term, "type");
-                assert!(message.contains("also a Rust reserved word"), "Error message: {}", message);
+                assert!(
+                    message.contains("also a Rust reserved word"),
+                    "Error message: {}",
+                    message
+                );
             }
             other => panic!("Expected CodeGen error, got {:?}", other),
         }
@@ -1615,12 +1675,14 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("fn kind("),
-            "Should use renamed method. Code:\n{}", code
+            "Should use renamed method. Code:\n{}",
+            code
         );
         // JSON key should still be "type" (original term name)
         assert!(
             code.contains("\"type\""),
-            "JSON key should be original term name. Code:\n{}", code
+            "JSON key should be original term name. Code:\n{}",
+            code
         );
     }
 
@@ -1669,11 +1731,13 @@ mod tests {
         // Both should be deduped with context prefix applied to the renamed name
         assert!(
             code.contains("fn ctx_a_kind("),
-            "Should have prefixed renamed method. Code:\n{}", code
+            "Should have prefixed renamed method. Code:\n{}",
+            code
         );
         assert!(
             code.contains("fn ctx_b_kind("),
-            "Should have prefixed renamed method. Code:\n{}", code
+            "Should have prefixed renamed method. Code:\n{}",
+            code
         );
     }
 
@@ -1738,7 +1802,11 @@ mod tests {
         assert!(code.contains("fn ctx_b_name("), "Code:\n{}", code);
         assert!(code.contains("fn ctx_c_name("), "Code:\n{}", code);
         // No unprefixed "name" method
-        assert!(!code.contains("fn name("), "Should not have unprefixed name. Code:\n{}", code);
+        assert!(
+            !code.contains("fn name("),
+            "Should not have unprefixed name. Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -1851,7 +1919,11 @@ mod tests {
         assert!(code.contains("CTX_A_NAME"), "Code:\n{}", code);
         assert!(code.contains("CTX_B_NAME"), "Code:\n{}", code);
         assert!(code.contains("CTX_C_NAME"), "Code:\n{}", code);
-        assert!(!code.contains("pub const NAME: &str"), "Should not have unprefixed NAME IRI constant. Code:\n{}", code);
+        assert!(
+            !code.contains("pub const NAME: &str"),
+            "Should not have unprefixed NAME IRI constant. Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -1904,7 +1976,9 @@ mod tests {
                 terms: vec![
                     TermDefinition {
                         name: "type".to_string(),
-                        kind: TermKind::KeywordAlias { keyword: "@type".to_string() },
+                        kind: TermKind::KeywordAlias {
+                            keyword: "@type".to_string(),
+                        },
                     },
                     TermDefinition {
                         name: "as".to_string(),
@@ -1919,16 +1993,38 @@ mod tests {
             },
         )];
         let renames = vec![
-            RenameDirective { from: "type".to_string(), to: "kind".to_string() },
-            RenameDirective { from: "as".to_string(), to: "as_value".to_string() },
+            RenameDirective {
+                from: "type".to_string(),
+                to: "kind".to_string(),
+            },
+            RenameDirective {
+                from: "as".to_string(),
+                to: "as_value".to_string(),
+            },
         ];
         let tokens = CodeGenerator::generate(&contexts, &[], &renames).unwrap();
         let code = format_tokens(tokens);
-        assert!(code.contains("fn kind("), "Should rename 'type' to 'kind'. Code:\n{}", code);
-        assert!(code.contains("fn as_value("), "Should rename 'as' to 'as_value'. Code:\n{}", code);
+        assert!(
+            code.contains("fn kind("),
+            "Should rename 'type' to 'kind'. Code:\n{}",
+            code
+        );
+        assert!(
+            code.contains("fn as_value("),
+            "Should rename 'as' to 'as_value'. Code:\n{}",
+            code
+        );
         // JSON keys use alias names (not primitive keywords)
-        assert!(code.contains("\"type\""), "JSON key should be alias name 'type'. Code:\n{}", code);
-        assert!(code.contains("\"as\""), "JSON key should be 'as'. Code:\n{}", code);
+        assert!(
+            code.contains("\"type\""),
+            "JSON key should be alias name 'type'. Code:\n{}",
+            code
+        );
+        assert!(
+            code.contains("\"as\""),
+            "JSON key should be 'as'. Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -1956,8 +2052,16 @@ mod tests {
         let code = format_tokens(tokens);
         // Both value setter and nested object setter should use renamed name
         assert!(code.contains("fn kind("), "Code:\n{}", code);
-        assert!(code.contains("fn kind_object"), "Should generate kind_object method. Code:\n{}", code);
-        assert!(!code.contains("fn type("), "Should not have 'type' method. Code:\n{}", code);
+        assert!(
+            code.contains("fn kind_object"),
+            "Should generate kind_object method. Code:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("fn type("),
+            "Should not have 'type' method. Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -2017,8 +2121,16 @@ mod tests {
         )];
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
-        assert!(code.contains("ld_emit::serde_json::Value::Array"), "Code:\n{}", code);
-        assert!(!code.contains("from_str"), "Should not use from_str. Code:\n{}", code);
+        assert!(
+            code.contains("ld_emit::serde_json::Value::Array"),
+            "Code:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("from_str"),
+            "Should not use from_str. Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -2037,9 +2149,21 @@ mod tests {
         )];
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
-        assert!(code.contains("ld_emit::serde_json::Value::Bool(true)"), "Code:\n{}", code);
-        assert!(code.contains("ld_emit::serde_json::Value::Bool(false)"), "Code:\n{}", code);
-        assert!(code.contains("ld_emit::serde_json::Value::Null"), "Code:\n{}", code);
+        assert!(
+            code.contains("ld_emit::serde_json::Value::Bool(true)"),
+            "Code:\n{}",
+            code
+        );
+        assert!(
+            code.contains("ld_emit::serde_json::Value::Bool(false)"),
+            "Code:\n{}",
+            code
+        );
+        assert!(
+            code.contains("ld_emit::serde_json::Value::Null"),
+            "Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -2056,7 +2180,11 @@ mod tests {
         )];
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
-        assert!(code.contains("ld_emit::serde_json::Value::Number"), "Code:\n{}", code);
+        assert!(
+            code.contains("ld_emit::serde_json::Value::Number"),
+            "Code:\n{}",
+            code
+        );
         assert!(!code.contains("from_str"), "Code:\n{}", code);
     }
 
@@ -2095,7 +2223,8 @@ mod tests {
         // Doc should list all three context names
         assert!(
             code.contains("ActivityStreams + SecurityV1 + TootExt"),
-            "Context alias doc should list all context types. Code:\n{}", code
+            "Context alias doc should list all context types. Code:\n{}",
+            code
         );
     }
 
@@ -2121,7 +2250,8 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             code.contains("Set the `myProp` property with a direct value"),
-            "Expose value should have doc. Code:\n{}", code
+            "Expose value should have doc. Code:\n{}",
+            code
         );
     }
 
@@ -2138,7 +2268,11 @@ mod tests {
         assert!(code.contains("#[allow(clippy::all)]"), "Code:\n{}", code);
         // The inner module and re-export pattern
         assert!(code.contains("mod __ld_emit_inner"), "Code:\n{}", code);
-        assert!(code.contains("pub use __ld_emit_inner::*"), "Code:\n{}", code);
+        assert!(
+            code.contains("pub use __ld_emit_inner::*"),
+            "Code:\n{}",
+            code
+        );
     }
 
     // --- Context with only Prefix terms (no methods, no IRI constants) ---
@@ -2191,7 +2325,11 @@ mod tests {
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
         assert!(code.contains("pub struct EmptyCtx"), "Code:\n{}", code);
-        assert!(code.contains("pub type Context = EmptyCtx"), "Code:\n{}", code);
+        assert!(
+            code.contains("pub type Context = EmptyCtx"),
+            "Code:\n{}",
+            code
+        );
         // Valid Rust syntax (already asserted by format_tokens)
     }
 
@@ -2212,7 +2350,9 @@ mod tests {
                     },
                     TermDefinition {
                         name: "type".to_string(),
-                        kind: TermKind::KeywordAlias { keyword: "@type".to_string() },
+                        kind: TermKind::KeywordAlias {
+                            keyword: "@type".to_string(),
+                        },
                     },
                 ],
                 original_json: serde_json::json!({}),
@@ -2238,7 +2378,8 @@ mod tests {
         let code = format_tokens(tokens);
         assert!(
             !code.contains("r#"),
-            "Generated code should not contain raw identifiers. Code:\n{}", code
+            "Generated code should not contain raw identifiers. Code:\n{}",
+            code
         );
     }
 
@@ -2274,10 +2415,18 @@ mod tests {
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
         assert!(code.contains("fn public_key_pem("), "Code:\n{}", code);
-        assert!(code.contains("fn manually_approves_followers("), "Code:\n{}", code);
+        assert!(
+            code.contains("fn manually_approves_followers("),
+            "Code:\n{}",
+            code
+        );
         // JSON keys should remain camelCase
         assert!(code.contains("\"publicKeyPem\""), "Code:\n{}", code);
-        assert!(code.contains("\"manuallyApprovesFollowers\""), "Code:\n{}", code);
+        assert!(
+            code.contains("\"manuallyApprovesFollowers\""),
+            "Code:\n{}",
+            code
+        );
     }
 
     // --- PascalCase type constants from camelCase terms ---
@@ -2308,9 +2457,17 @@ mod tests {
         let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
         let code = format_tokens(tokens);
         // PascalCase → SCREAMING_SNAKE_CASE
-        assert!(code.contains("pub const CRYPTOGRAPHIC_KEY: ld_emit::TypeConstant"), "Code:\n{}", code);
+        assert!(
+            code.contains("pub const CRYPTOGRAPHIC_KEY: ld_emit::TypeConstant"),
+            "Code:\n{}",
+            code
+        );
         // camelCase → SCREAMING_SNAKE_CASE
-        assert!(code.contains("pub const PUBLIC_KEY: ld_emit::TypeConstant"), "Code:\n{}", code);
+        assert!(
+            code.contains("pub const PUBLIC_KEY: ld_emit::TypeConstant"),
+            "Code:\n{}",
+            code
+        );
     }
 
     // --- Multiple expose_value directives ---
@@ -2339,8 +2496,12 @@ mod tests {
             },
         )];
         let expose = vec![
-            ExposeValueDirective { expanded_iri: "https://example.com#content".to_string() },
-            ExposeValueDirective { expanded_iri: "https://example.com#discoverable".to_string() },
+            ExposeValueDirective {
+                expanded_iri: "https://example.com#content".to_string(),
+            },
+            ExposeValueDirective {
+                expanded_iri: "https://example.com#discoverable".to_string(),
+            },
         ];
         let tokens = CodeGenerator::generate(&contexts, &expose, &[]).unwrap();
         let code = format_tokens(tokens);
@@ -2357,7 +2518,11 @@ mod tests {
         let code = format_tokens(tokens);
         // Both contexts should have ContextSerializer impls
         // prettyplease may wrap long impl lines, so check for key parts
-        assert!(code.contains("ld_emit::ContextSerializer"), "Code:\n{}", code);
+        assert!(
+            code.contains("ld_emit::ContextSerializer"),
+            "Code:\n{}",
+            code
+        );
         assert!(code.contains("for ActivityStreams<S>"), "Code:\n{}", code);
         assert!(code.contains("for SecurityV1<S>"), "Code:\n{}", code);
         assert!(code.contains("fn context_json()"), "Code:\n{}", code);
@@ -2397,13 +2562,33 @@ mod tests {
         let code = format_tokens(tokens);
         // Each context should forward all other marker traits
         // CtxA forwards HasCtxB and HasCtxC
-        assert!(code.contains("impl<S: HasCtxB> HasCtxB for CtxA<S>"), "Code:\n{}", code);
-        assert!(code.contains("impl<S: HasCtxC> HasCtxC for CtxA<S>"), "Code:\n{}", code);
+        assert!(
+            code.contains("impl<S: HasCtxB> HasCtxB for CtxA<S>"),
+            "Code:\n{}",
+            code
+        );
+        assert!(
+            code.contains("impl<S: HasCtxC> HasCtxC for CtxA<S>"),
+            "Code:\n{}",
+            code
+        );
         // CtxB forwards HasCtxA and HasCtxC
-        assert!(code.contains("impl<S: HasCtxA> HasCtxA for CtxB<S>"), "Code:\n{}", code);
-        assert!(code.contains("impl<S: HasCtxC> HasCtxC for CtxB<S>"), "Code:\n{}", code);
+        assert!(
+            code.contains("impl<S: HasCtxA> HasCtxA for CtxB<S>"),
+            "Code:\n{}",
+            code
+        );
+        assert!(
+            code.contains("impl<S: HasCtxC> HasCtxC for CtxB<S>"),
+            "Code:\n{}",
+            code
+        );
         // Type alias: CtxA<CtxB<CtxC>>
-        assert!(code.contains("pub type Context = CtxA<CtxB<CtxC>>"), "Code:\n{}", code);
+        assert!(
+            code.contains("pub type Context = CtxA<CtxB<CtxC>>"),
+            "Code:\n{}",
+            code
+        );
     }
 
     // --- Single context: no cross-forwarding ---
@@ -2416,7 +2601,11 @@ mod tests {
         // Should not contain cross-forwarding impls
         // Only the direct marker impl: impl<S> HasActivityStreams for ActivityStreams<S>
         let cross_fwd_count = code.matches("impl<S: Has").count();
-        assert_eq!(cross_fwd_count, 0, "Single context should have no cross-forwarding. Code:\n{}", code);
+        assert_eq!(
+            cross_fwd_count, 0,
+            "Single context should have no cross-forwarding. Code:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -2451,12 +2640,14 @@ mod tests {
         // SimpleTerm "Image" should produce the constant with the SimpleTerm IRI
         assert!(
             code.contains(r#"pub const IMAGE: &str = "https://example.com#Image""#),
-            "SimpleTerm should win. Code:\n{}", code
+            "SimpleTerm should win. Code:\n{}",
+            code
         );
         // ExtendedTerm "image" should NOT produce a separate constant
         assert!(
             !code.contains(r#""https://example.com#image""#),
-            "ExtendedTerm IRI should be skipped. Code:\n{}", code
+            "ExtendedTerm IRI should be skipped. Code:\n{}",
+            code
         );
     }
 }

@@ -156,10 +156,8 @@ impl<T: serde::Serialize> serde::Serialize for LDList<T> {
 
 pub trait LDSerializable {
     type Context: ContextSerializer;
-    fn ld_serialize(
-        &self,
-        serializer: &mut ObjectSerializer<Self::Context>,
-    ) -> Result<(), LDError>;
+    fn ld_serialize(&self, serializer: &mut ObjectSerializer<Self::Context>)
+    -> Result<(), LDError>;
 }
 
 // === Serialization Functions ===
@@ -415,8 +413,7 @@ mod tests {
         };
 
         let mut ser = ObjectSerializer::<()>::new();
-        ser.type_def(&[&NOTE_TYPE])
-            .field("name", "test");
+        ser.type_def(&[&NOTE_TYPE]).field("name", "test");
         let map = ser.into_map();
         assert_eq!(map.len(), 2);
     }
@@ -456,7 +453,10 @@ mod tests {
             language: "en".to_string(),
         };
         let json = serde_json::to_value(&ls).unwrap();
-        assert_eq!(json, serde_json::json!({"@value": "Hello", "@language": "en"}));
+        assert_eq!(
+            json,
+            serde_json::json!({"@value": "Hello", "@language": "en"})
+        );
     }
 
     #[test]

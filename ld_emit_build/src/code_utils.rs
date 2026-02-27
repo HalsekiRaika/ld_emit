@@ -15,10 +15,10 @@ pub fn to_snake_case(s: &str) -> String {
                 } else if prev.is_uppercase() {
                     // Check if next char is lowercase (e.g., "URL" -> keep together, "URLParser" -> "url_parser")
                     if let Some(&next) = s.as_bytes().get(i + 1)
-                        && (next as char).is_lowercase() {
-                            result.push('_');
-                        }
-                    
+                        && (next as char).is_lowercase()
+                    {
+                        result.push('_');
+                    }
                 }
             }
             result.push(ch.to_lowercase().next().unwrap());
@@ -50,10 +50,10 @@ pub fn to_pascal_case(s: &str) -> String {
 }
 
 const RUST_RESERVED_WORDS: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
-    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
-    "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-    "type", "unsafe", "use", "where", "while", "yield",
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while", "yield",
 ];
 
 /// Check if a name is a Rust reserved word.
@@ -127,7 +127,10 @@ mod tests {
 
     #[test]
     fn snake_case_acronym_followed_by_word() {
-        assert_eq!(to_snake_case("manuallyApprovesFollowers"), "manually_approves_followers");
+        assert_eq!(
+            to_snake_case("manuallyApprovesFollowers"),
+            "manually_approves_followers"
+        );
     }
 
     // === to_pascal_case Tests ===
@@ -228,10 +231,7 @@ mod tests {
 
     #[test]
     fn dedup_pascal_context() {
-        assert_eq!(
-            dedup_method_name("SecurityV1", "id"),
-            "security_v1_id"
-        );
+        assert_eq!(dedup_method_name("SecurityV1", "id"), "security_v1_id");
     }
 
     // === is_reserved Tests ===

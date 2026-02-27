@@ -6,22 +6,21 @@ pub struct ContextParser;
 
 impl ContextParser {
     pub fn parse(json: &str) -> Result<ParsedContext, LDBuildError> {
-        let value: serde_json::Value = serde_json::from_str(json).map_err(|e| {
-            LDBuildError::Parse {
+        let value: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| LDBuildError::Parse {
                 context: String::new(),
                 message: e.to_string(),
                 position: None,
-            }
-        })?;
+            })?;
 
         let original_json = value.clone();
 
         // Unwrap @context key if present
-        let context_value = if let Some(ctx) = value.as_object().and_then(|o| o.get("@context")) {
-            ctx.clone()
-        } else {
-            value
-        };
+        let context_value = value
+            .as_object()
+            .and_then(|o| o.get("@context"))
+            .cloned()
+            .unwrap_or(value);
 
         let mut resolver = PrefixResolver::new();
         let mut terms = Vec::new();
@@ -51,7 +50,6 @@ impl ContextParser {
                     {
                         resolver.add_prefix(key, uri);
                     }
-                    
                 }
 
                 // Second pass: classify all entries

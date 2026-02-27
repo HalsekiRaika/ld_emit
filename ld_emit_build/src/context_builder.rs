@@ -68,10 +68,13 @@ impl ContextBuilder {
     }
 
     pub fn generate(&self) -> Result<(), LDBuildError> {
-        let serializer_name = self.serializer_name.as_ref().ok_or_else(|| LDBuildError::CodeGen {
-            term: "ContextBuilder".to_string(),
-            message: "@serializer_name is required but was not set".to_string(),
-        })?;
+        let serializer_name =
+            self.serializer_name
+                .as_ref()
+                .ok_or_else(|| LDBuildError::CodeGen {
+                    term: "ContextBuilder".to_string(),
+                    message: "@serializer_name is required but was not set".to_string(),
+                })?;
 
         let cache_dir = self.out_dir.join(".ld_emit_cache");
         let fetcher = ContextFetcher::new(cache_dir);
@@ -85,8 +88,8 @@ impl ContextBuilder {
                     ContextParser::parse(&json)?
                 }
                 ContextSource::Inline(value) => {
-                    let json_str = serde_json::to_string(value)
-                        .map_err(|e| LDBuildError::Parse {
+                    let json_str =
+                        serde_json::to_string(value).map_err(|e| LDBuildError::Parse {
                             context: name.clone(),
                             message: format!("Failed to serialize inline context: {}", e),
                             position: None,
@@ -101,11 +104,10 @@ impl ContextBuilder {
         let tokens = CodeGenerator::generate(&parsed_contexts, &self.expose_values, &self.renames)?;
 
         // Format with prettyplease
-        let syntax_tree: syn::File = syn::parse2(tokens)
-            .map_err(|e| LDBuildError::CodeGen {
-                term: "generated code".to_string(),
-                message: format!("Generated code is not valid Rust: {}", e),
-            })?;
+        let syntax_tree: syn::File = syn::parse2(tokens).map_err(|e| LDBuildError::CodeGen {
+            term: "generated code".to_string(),
+            message: format!("Generated code is not valid Rust: {}", e),
+        })?;
         let formatted = prettyplease::unparse(&syntax_tree);
 
         // Write to OUT_DIR using serializer_name
@@ -119,8 +121,7 @@ impl ContextBuilder {
         // Write to export_dir path (relative to CARGO_MANIFEST_DIR) if set
         if let Some(ref export_dir) = self.export_dir {
             let manifest_dir = PathBuf::from(
-                std::env::var_os("CARGO_MANIFEST_DIR")
-                    .expect("CARGO_MANIFEST_DIR not set"),
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"),
             );
             let include_path = manifest_dir.join(export_dir).join(&output_filename);
             if let Some(parent) = include_path.parent() {
@@ -156,7 +157,9 @@ mod tests {
         );
         assert_eq!(builder.contexts.len(), 1);
         assert_eq!(builder.contexts[0].0, "activity_streams");
-        assert!(matches!(&builder.contexts[0].1, ContextSource::Url(u) if u == "https://www.w3.org/ns/activitystreams"));
+        assert!(
+            matches!(&builder.contexts[0].1, ContextSource::Url(u) if u == "https://www.w3.org/ns/activitystreams")
+        );
     }
 
     #[test]
@@ -452,10 +455,17 @@ mod tests {
         );
         builder.set_serializer_name("test_output");
         let result = builder.generate();
-        assert!(result.is_ok(), "KeywordAlias 'type' should auto-resolve without @rename");
+        assert!(
+            result.is_ok(),
+            "KeywordAlias 'type' should auto-resolve without @rename"
+        );
         let output_path = tmp_dir.join("test_output.rs");
         let code = fs::read_to_string(&output_path).unwrap();
-        assert!(code.contains("r#type"), "Generated code should contain r#type. Code:\n{}", code);
+        assert!(
+            code.contains("r#type"),
+            "Generated code should contain r#type. Code:\n{}",
+            code
+        );
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }
@@ -475,7 +485,10 @@ mod tests {
         );
         builder.set_serializer_name("test_output");
         let result = builder.generate();
-        assert!(result.is_err(), "ExtendedTerm 'fn' without @rename should error");
+        assert!(
+            result.is_err(),
+            "ExtendedTerm 'fn' without @rename should error"
+        );
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }
@@ -536,8 +549,7 @@ mod tests {
         let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
 
         // Re-parse and re-format: prettyplease output should be idempotent
-        let syntax_tree = syn::parse_file(&content)
-            .expect("Generated code should be valid Rust");
+        let syntax_tree = syn::parse_file(&content).expect("Generated code should be valid Rust");
         let reformatted = prettyplease::unparse(&syntax_tree);
 
         assert_eq!(
@@ -599,7 +611,10 @@ mod tests {
 
         // The output file should exist at the expected path
         let output_path = tmp_dir.join("test_output.rs");
-        assert!(output_path.exists(), "Generated file should exist at OUT_DIR/test_output.rs");
+        assert!(
+            output_path.exists(),
+            "Generated file should exist at OUT_DIR/test_output.rs"
+        );
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }

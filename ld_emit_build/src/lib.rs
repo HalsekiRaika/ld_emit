@@ -1,19 +1,19 @@
+mod code_generator;
+pub mod code_utils;
+mod context_builder;
+mod context_fetcher;
+mod context_parser;
 mod error;
 mod models;
 mod prefix_resolver;
-mod context_parser;
-mod context_fetcher;
-pub mod code_utils;
-mod code_generator;
-mod context_builder;
 
+pub use code_generator::CodeGenerator;
+pub use context_builder::ContextBuilder;
+pub use context_fetcher::ContextFetcher;
+pub use context_parser::ContextParser;
 pub use error::LDBuildError;
 pub use models::*;
 pub use prefix_resolver::PrefixResolver;
-pub use context_parser::ContextParser;
-pub use context_fetcher::ContextFetcher;
-pub use code_generator::CodeGenerator;
-pub use context_builder::ContextBuilder;
 
 // Re-export serde_json for use in ld_context! macro
 pub use serde_json;
@@ -554,7 +554,9 @@ mod tests {
         assert!(matches!(&id_term.kind, TermKind::KeywordAlias { keyword } if keyword == "@id"));
 
         let type_term = find_term(&result.terms, "type").unwrap();
-        assert!(matches!(&type_term.kind, TermKind::KeywordAlias { keyword } if keyword == "@type"));
+        assert!(
+            matches!(&type_term.kind, TermKind::KeywordAlias { keyword } if keyword == "@type")
+        );
     }
 
     // Form 3: @vocab declaration - skipped (context-level directive, not a term)
@@ -637,9 +639,7 @@ mod tests {
         let term = find_term(&result.terms, "published").unwrap();
         match &term.kind {
             TermKind::ExtendedTerm {
-                id,
-                type_coercion,
-                ..
+                id, type_coercion, ..
             } => {
                 assert_eq!(id, "https://www.w3.org/ns/activitystreams#published");
                 match type_coercion {
@@ -737,9 +737,7 @@ mod tests {
         let result = ContextParser::parse(json).unwrap();
         let term = find_term(&result.terms, "proofPurpose").unwrap();
         match &term.kind {
-            TermKind::ExtendedTerm {
-                type_coercion, ..
-            } => {
+            TermKind::ExtendedTerm { type_coercion, .. } => {
                 assert!(matches!(type_coercion, Some(TypeCoercion::Vocab)));
             }
             other => panic!("Expected ExtendedTerm, got {:?}", other),

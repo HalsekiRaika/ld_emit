@@ -15,9 +15,15 @@ pub enum Container {
 
 #[derive(Debug, Clone)]
 pub enum TermKind {
-    Prefix { uri: String },
-    KeywordAlias { keyword: String },
-    SimpleTerm { iri: String },
+    Prefix {
+        uri: String,
+    },
+    KeywordAlias {
+        keyword: String,
+    },
+    SimpleTerm {
+        iri: String,
+    },
     ExtendedTerm {
         id: String,
         type_coercion: Option<TypeCoercion>,
