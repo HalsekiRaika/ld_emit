@@ -1,0 +1,11 @@
+[workspace]
+members = [
+  "ld_emit",
+  "ld_emit_build",
+  "example/*",
+]
+default-members = [
+  "ld_emit",
+  "ld_emit_build",
+]
+resolver = "3"

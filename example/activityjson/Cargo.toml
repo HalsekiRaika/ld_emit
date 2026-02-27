@@ -1,0 +1,10 @@
+[package]
+name = "activityjson"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ld_emit = { path = "../../ld_emit" }
+
+[build-dependencies]
+ld_emit_build = { path = "../../ld_emit_build" }
