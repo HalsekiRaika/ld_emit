@@ -1,11 +1,16 @@
 [workspace]
 members = [
+  "example/*",
   "ld_emit",
   "ld_emit_build",
-  "example/*",
 ]
 default-members = [
   "ld_emit",
   "ld_emit_build",
 ]
 resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["RechellaTek <reirokusanami.rdh@gmail.com>"]
