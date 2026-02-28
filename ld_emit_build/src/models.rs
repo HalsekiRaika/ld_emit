@@ -39,13 +39,25 @@ pub struct TermDefinition {
 
 #[derive(Debug, Clone)]
 pub enum ContextSource {
+    /// フェッチ専用モード: `name = "url"`
     Url(String),
-    Inline(serde_json::Value),
+
+    /// 継承モード: `name = "url" inherit: { ... }`
+    Inherit {
+        url: String,
+        overrides: serde_json::Value,
+    },
+
+    /// エイリアス付き名前空間定義: `name = "uri" with alias: { ... }`
+    WithAlias {
+        uri: String,
+        alias: String,
+        terms: serde_json::Value,
+    },
 }
 
 #[derive(Debug)]
 pub struct ParsedContext {
-    pub source: ContextSource,
     pub terms: Vec<TermDefinition>,
     pub original_json: serde_json::Value,
 }

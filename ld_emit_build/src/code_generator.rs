@@ -524,7 +524,10 @@ impl CodeGenerator {
                             other => vec![other],
                         };
                         let ctx_value: ld_emit::serde_json::Value = #ctx_value_expr;
-                        arr.push(ctx_value);
+                        match ctx_value {
+                            ld_emit::serde_json::Value::Array(elements) => arr.extend(elements),
+                            other => arr.push(other),
+                        }
                         ld_emit::serde_json::Value::Array(arr)
                     }
                 }
@@ -636,7 +639,6 @@ mod tests {
         vec![(
             "activity_streams".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://www.w3.org/ns/activitystreams".to_string()),
                 terms: vec![
                     TermDefinition {
                         name: "Note".to_string(),
@@ -681,7 +683,6 @@ mod tests {
             (
                 "activity_streams".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://www.w3.org/ns/activitystreams".to_string()),
                     terms: vec![
                         TermDefinition {
                             name: "Note".to_string(),
@@ -704,7 +705,6 @@ mod tests {
             (
                 "security_v1".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://w3id.org/security/v1".to_string()),
                     terms: vec![
                         TermDefinition {
                             name: "CryptographicKey".to_string(),
@@ -923,10 +923,6 @@ mod tests {
         let contexts = vec![(
             "inline_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({
-                    "name": "https://schema.org/name",
-                    "url": {"@id": "https://schema.org/url", "@type": "@id"}
-                })),
                 terms: vec![TermDefinition {
                     name: "name".to_string(),
                     kind: TermKind::SimpleTerm {
@@ -1018,7 +1014,6 @@ mod tests {
         let contexts = vec![(
             "mixed".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![
                     TermDefinition {
                         name: "as".to_string(),
@@ -1078,7 +1073,6 @@ mod tests {
             (
                 "activity_streams".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://www.w3.org/ns/activitystreams".to_string()),
                     terms: vec![
                         TermDefinition {
                             name: "id".to_string(),
@@ -1141,7 +1135,6 @@ mod tests {
             (
                 "security_v1".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://w3id.org/security/v1".to_string()),
                     terms: vec![
                         TermDefinition {
                             name: "CryptographicKey".to_string(),
@@ -1172,10 +1165,6 @@ mod tests {
             (
                 "toot_ext".to_string(),
                 ParsedContext {
-                    source: ContextSource::Inline(serde_json::json!({
-                        "toot": "http://joinmastodon.org/ns#",
-                        "discoverable": "toot:discoverable"
-                    })),
                     terms: vec![TermDefinition {
                         name: "discoverable".to_string(),
                         kind: TermKind::SimpleTerm {
@@ -1289,7 +1278,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1304,7 +1292,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1450,7 +1437,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1465,7 +1451,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1517,7 +1502,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
                     kind: TermKind::KeywordAlias {
@@ -1567,7 +1551,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
                     kind: TermKind::KeywordAlias {
@@ -1601,7 +1584,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
                     kind: TermKind::KeywordAlias {
@@ -1635,7 +1617,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "as".to_string(),
                     kind: TermKind::Prefix {
@@ -1655,7 +1636,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
                     kind: TermKind::ExtendedTerm {
@@ -1694,7 +1674,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![TermDefinition {
                         name: "type".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1709,7 +1688,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "type".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1753,7 +1731,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1768,7 +1745,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1783,7 +1759,6 @@ mod tests {
             (
                 "ctx_c".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/c".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1817,7 +1792,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![
                         TermDefinition {
                             name: "name".to_string(),
@@ -1842,7 +1816,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1873,7 +1846,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1888,7 +1860,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1903,7 +1874,6 @@ mod tests {
             (
                 "ctx_c".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/c".to_string()),
                     terms: vec![TermDefinition {
                         name: "name".to_string(),
                         kind: TermKind::SimpleTerm {
@@ -1933,7 +1903,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![TermDefinition {
                         name: "status".to_string(),
                         kind: TermKind::SimpleTerm {
@@ -1946,7 +1915,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![TermDefinition {
                         name: "status".to_string(),
                         kind: TermKind::ExtendedTerm {
@@ -1972,7 +1940,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![
                     TermDefinition {
                         name: "type".to_string(),
@@ -2032,7 +1999,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "type".to_string(),
                     kind: TermKind::ExtendedTerm {
@@ -2082,7 +2048,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![TermDefinition {
                     name: "fn".to_string(),
                     kind: TermKind::ExtendedTerm {
@@ -2112,7 +2077,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![],
                 original_json: serde_json::json!({
                     "items": ["a", "b", ["nested"]]
@@ -2138,7 +2102,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![],
                 original_json: serde_json::json!({
                     "flag": true,
@@ -2171,7 +2134,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![],
                 original_json: serde_json::json!({
                     "@version": 1.1
@@ -2196,7 +2158,6 @@ mod tests {
             (
                 "activity_streams".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/as".to_string()),
                     terms: vec![],
                     original_json: serde_json::json!("https://example.com/as"),
                 },
@@ -2204,7 +2165,6 @@ mod tests {
             (
                 "security_v1".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/sec".to_string()),
                     terms: vec![],
                     original_json: serde_json::json!("https://example.com/sec"),
                 },
@@ -2212,7 +2172,6 @@ mod tests {
             (
                 "toot_ext".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/toot".to_string()),
                     terms: vec![],
                     original_json: serde_json::json!("https://example.com/toot"),
                 },
@@ -2233,7 +2192,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://example.com".to_string()),
                 terms: vec![TermDefinition {
                     name: "myProp".to_string(),
                     kind: TermKind::SimpleTerm {
@@ -2282,7 +2240,6 @@ mod tests {
         let contexts = vec![(
             "prefix_only".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![
                     TermDefinition {
                         name: "as".to_string(),
@@ -2317,7 +2274,6 @@ mod tests {
         let contexts = vec![(
             "empty_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://example.com".to_string()),
                 terms: vec![],
                 original_json: serde_json::json!("https://example.com"),
             },
@@ -2340,7 +2296,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Inline(serde_json::json!({})),
                 terms: vec![
                     TermDefinition {
                         name: "as".to_string(),
@@ -2390,7 +2345,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://example.com".to_string()),
                 terms: vec![
                     TermDefinition {
                         name: "publicKeyPem".to_string(),
@@ -2436,7 +2390,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://example.com".to_string()),
                 terms: vec![
                     TermDefinition {
                         name: "CryptographicKey".to_string(),
@@ -2477,7 +2430,6 @@ mod tests {
         let contexts = vec![(
             "test_ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://example.com".to_string()),
                 terms: vec![
                     TermDefinition {
                         name: "content".to_string(),
@@ -2536,7 +2488,6 @@ mod tests {
             (
                 "ctx_a".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/a".to_string()),
                     terms: vec![],
                     original_json: serde_json::json!("https://example.com/a"),
                 },
@@ -2544,7 +2495,6 @@ mod tests {
             (
                 "ctx_b".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/b".to_string()),
                     terms: vec![],
                     original_json: serde_json::json!("https://example.com/b"),
                 },
@@ -2552,7 +2502,6 @@ mod tests {
             (
                 "ctx_c".to_string(),
                 ParsedContext {
-                    source: ContextSource::Url("https://example.com/c".to_string()),
                     terms: vec![],
                     original_json: serde_json::json!("https://example.com/c"),
                 },
@@ -2615,7 +2564,6 @@ mod tests {
         let contexts = vec![(
             "ctx".to_string(),
             ParsedContext {
-                source: ContextSource::Url("https://example.com/ctx".to_string()),
                 terms: vec![
                     TermDefinition {
                         name: "Image".to_string(),
@@ -2647,6 +2595,83 @@ mod tests {
         assert!(
             !code.contains(r#""https://example.com#image""#),
             "ExtendedTerm IRI should be skipped. Code:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn context_serializer_array_original_json_extends_flat() {
+        // When original_json is an Array (e.g., from inherit mode: ["url", {overrides}]),
+        // the generated code should use extend() to flatten the array elements
+        // instead of push() which would create a nested array.
+        let contexts = vec![(
+            "test_ctx".to_string(),
+            ParsedContext {
+                terms: vec![],
+                original_json: serde_json::json!([
+                    "https://www.w3.org/ns/activitystreams",
+                    {"manuallyApprovesFollowers": "as:manuallyApprovesFollowers"}
+                ]),
+            },
+        )];
+        let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
+        let code = format_tokens(tokens);
+
+        // Should contain extend logic for Array type
+        assert!(
+            code.contains("extend"),
+            "Array original_json should use extend to flatten. Code:\n{}",
+            code
+        );
+        // Should still contain push for non-array fallback
+        assert!(
+            code.contains("push"),
+            "Should have push fallback for non-Array types. Code:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn context_serializer_string_original_json_still_uses_push() {
+        // String original_json (fetch-only mode) should still use push
+        let contexts = vec![(
+            "test_ctx".to_string(),
+            ParsedContext {
+                terms: vec![],
+                original_json: serde_json::json!("https://www.w3.org/ns/activitystreams"),
+            },
+        )];
+        let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
+        let code = format_tokens(tokens);
+
+        // String value goes through push path
+        assert!(
+            code.contains("push") || code.contains("extend"),
+            "String original_json should still work. Code:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn context_serializer_object_original_json_still_uses_push() {
+        // Object original_json (with mode) should still use push
+        let contexts = vec![(
+            "test_ctx".to_string(),
+            ParsedContext {
+                terms: vec![],
+                original_json: serde_json::json!({
+                    "toot": "http://joinmastodon.org/ns#",
+                    "discoverable": "toot:discoverable"
+                }),
+            },
+        )];
+        let tokens = CodeGenerator::generate(&contexts, &[], &[]).unwrap();
+        let code = format_tokens(tokens);
+
+        // Object value goes through push path (not extend)
+        assert!(
+            code.contains("push"),
+            "Object original_json should use push. Code:\n{}",
             code
         );
     }

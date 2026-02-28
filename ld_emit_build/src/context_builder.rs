@@ -87,11 +87,52 @@ impl ContextBuilder {
                     let json = fetcher.fetch(url)?;
                     ContextParser::parse(&json)?
                 }
-                ContextSource::Inline(value) => {
-                    let json_str =
-                        serde_json::to_string(value).map_err(|e| LDBuildError::Parse {
+                ContextSource::Inherit { url, overrides } => {
+                    // Fetch the remote context
+                    let json = fetcher.fetch(url)?;
+                    let fetched_value: serde_json::Value =
+                        serde_json::from_str(&json).map_err(|e| LDBuildError::Parse {
                             context: name.clone(),
-                            message: format!("Failed to serialize inline context: {}", e),
+                            message: format!("Failed to parse fetched context: {}", e),
+                            position: None,
+                        })?;
+
+                    // Unwrap @context key and merge overrides
+                    let context_value = Self::unwrap_context_value(&fetched_value);
+                    let merged = Self::merge_context_json(&context_value, overrides);
+
+                    // Parse the merged JSON
+                    let merged_str =
+                        serde_json::to_string(&merged).map_err(|e| LDBuildError::Parse {
+                            context: name.clone(),
+                            message: format!("Failed to serialize merged context: {}", e),
+                            position: None,
+                        })?;
+                    let mut parsed = ContextParser::parse(&merged_str)?;
+
+                    // Override original_json:
+                    // - If overrides is empty object, use just the URL string
+                    // - Otherwise, use [url, overrides] array format
+                    let is_empty = overrides
+                        .as_object()
+                        .map(|o| o.is_empty())
+                        .unwrap_or(false);
+                    if is_empty {
+                        parsed.original_json = serde_json::Value::String(url.clone());
+                    } else {
+                        parsed.original_json = serde_json::json!([url, overrides]);
+                    }
+
+                    parsed
+                }
+                ContextSource::WithAlias { uri, alias, terms } => {
+                    // Build JSON: {alias: uri, ...terms} — no remote fetch
+                    let constructed = Self::build_with_alias_json(uri, alias, terms);
+
+                    let json_str =
+                        serde_json::to_string(&constructed).map_err(|e| LDBuildError::Parse {
+                            context: name.clone(),
+                            message: format!("Failed to serialize WithAlias context: {}", e),
                             position: None,
                         })?;
                     ContextParser::parse(&json_str)?
@@ -132,6 +173,64 @@ impl ContextBuilder {
 
         Ok(())
     }
+
+    /// Unwraps the `@context` key from a JSON-LD document.
+    /// If the value has an `@context` key, returns its value.
+    /// Otherwise, returns the value itself.
+    fn unwrap_context_value(value: &serde_json::Value) -> serde_json::Value {
+        value
+            .as_object()
+            .and_then(|o| o.get("@context"))
+            .cloned()
+            .unwrap_or_else(|| value.clone())
+    }
+
+    /// Merges override entries into a fetched context JSON.
+    /// - If fetched is an Object: shallow merge (overrides keys overwrite)
+    /// - If fetched is an Array: append overrides as a new Object element
+    /// - If overrides is empty, returns fetched unchanged
+    fn merge_context_json(
+        fetched_context: &serde_json::Value,
+        overrides: &serde_json::Value,
+    ) -> serde_json::Value {
+        let override_obj = match overrides.as_object() {
+            Some(o) if o.is_empty() => return fetched_context.clone(),
+            Some(o) => o,
+            None => return fetched_context.clone(),
+        };
+
+        match fetched_context {
+            serde_json::Value::Object(fetched_obj) => {
+                let mut merged = fetched_obj.clone();
+                for (key, val) in override_obj {
+                    merged.insert(key.clone(), val.clone());
+                }
+                serde_json::Value::Object(merged)
+            }
+            serde_json::Value::Array(arr) => {
+                let mut new_arr = arr.clone();
+                new_arr.push(serde_json::Value::Object(override_obj.clone()));
+                serde_json::Value::Array(new_arr)
+            }
+            _ => fetched_context.clone(),
+        }
+    }
+
+    /// Builds a JSON object for WithAlias mode: `{alias: uri, ...terms}`
+    fn build_with_alias_json(
+        uri: &str,
+        alias: &str,
+        terms: &serde_json::Value,
+    ) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        map.insert(alias.to_string(), serde_json::Value::String(uri.to_string()));
+        if let Some(term_obj) = terms.as_object() {
+            for (key, val) in term_obj {
+                map.insert(key.clone(), val.clone());
+            }
+        }
+        serde_json::Value::Object(map)
+    }
 }
 
 #[cfg(test)]
@@ -163,17 +262,22 @@ mod tests {
     }
 
     #[test]
-    fn context_builder_add_context_inline() {
+    fn context_builder_add_context_with_alias() {
         let dir = OsString::from("/tmp/test_out");
         let mut builder = ContextBuilder::new(&dir);
-        let inline = serde_json::json!({
-            "toot": "http://joinmastodon.org/ns#",
-            "discoverable": "toot:discoverable"
-        });
-        builder.add_context("toot_ext", ContextSource::Inline(inline));
+        builder.add_context(
+            "toot_ext",
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
+        );
         assert_eq!(builder.contexts.len(), 1);
         assert_eq!(builder.contexts[0].0, "toot_ext");
-        assert!(matches!(&builder.contexts[0].1, ContextSource::Inline(_)));
+        assert!(matches!(&builder.contexts[0].1, ContextSource::WithAlias { .. }));
     }
 
     #[test]
@@ -202,10 +306,13 @@ mod tests {
         );
         builder.add_context(
             "toot_ext",
-            ContextSource::Inline(serde_json::json!({
-                "toot": "http://joinmastodon.org/ns#",
-                "discoverable": "toot:discoverable"
-            })),
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
         );
         assert_eq!(builder.contexts.len(), 3);
         // Order is preserved
@@ -223,11 +330,14 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "id": "@id",
-                "as": "https://www.w3.org/ns/activitystreams#",
-                "Note": "as:Note"
-            })),
+            ContextSource::WithAlias {
+                uri: "https://www.w3.org/ns/activitystreams#".to_string(),
+                alias: "as".to_string(),
+                terms: serde_json::json!({
+                    "id": "@id",
+                    "Note": "as:Note"
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -250,11 +360,19 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "first",
-            ContextSource::Inline(serde_json::json!({"id": "@id"})),
+            ContextSource::WithAlias {
+                uri: "https://example.com/first#".to_string(),
+                alias: "ex1".to_string(),
+                terms: serde_json::json!({"id": "@id"}),
+            },
         );
         builder.add_context(
             "second",
-            ContextSource::Inline(serde_json::json!({"value": "@value"})),
+            ContextSource::WithAlias {
+                uri: "https://example.com/second#".to_string(),
+                alias: "ex2".to_string(),
+                terms: serde_json::json!({"value": "@value"}),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -277,30 +395,39 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "activity_streams",
-            ContextSource::Inline(serde_json::json!({
-                "id": "@id",
-                "as": "https://www.w3.org/ns/activitystreams#",
-                "Note": "as:Note",
-                "Person": "as:Person",
-                "name": {"@id": "as:name"},
-                "actor": {"@id": "as:actor", "@type": "@id"},
-                "content": "as:content"
-            })),
+            ContextSource::WithAlias {
+                uri: "https://www.w3.org/ns/activitystreams#".to_string(),
+                alias: "as".to_string(),
+                terms: serde_json::json!({
+                    "id": "@id",
+                    "Note": "as:Note",
+                    "Person": "as:Person",
+                    "name": {"@id": "as:name"},
+                    "actor": {"@id": "as:actor", "@type": "@id"},
+                    "content": "as:content"
+                }),
+            },
         );
         builder.add_context(
             "security_v1",
-            ContextSource::Inline(serde_json::json!({
-                "sec": "https://w3id.org/security#",
-                "CryptographicKey": "sec:Key",
-                "publicKey": {"@id": "sec:publicKey", "@type": "@id"}
-            })),
+            ContextSource::WithAlias {
+                uri: "https://w3id.org/security#".to_string(),
+                alias: "sec".to_string(),
+                terms: serde_json::json!({
+                    "CryptographicKey": "sec:Key",
+                    "publicKey": {"@id": "sec:publicKey", "@type": "@id"}
+                }),
+            },
         );
         builder.add_context(
             "toot_ext",
-            ContextSource::Inline(serde_json::json!({
-                "toot": "http://joinmastodon.org/ns#",
-                "discoverable": "toot:discoverable"
-            })),
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -361,11 +488,14 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "as": "https://www.w3.org/ns/activitystreams#",
-                "content": "as:content",
-                "name": {"@id": "as:name"}
-            })),
+            ContextSource::WithAlias {
+                uri: "https://www.w3.org/ns/activitystreams#".to_string(),
+                alias: "as".to_string(),
+                terms: serde_json::json!({
+                    "content": "as:content",
+                    "name": {"@id": "as:name"}
+                }),
+            },
         );
         builder.add_expose_value("https://www.w3.org/ns/activitystreams#content");
         builder.set_serializer_name("test_output");
@@ -398,10 +528,13 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "as": "https://www.w3.org/ns/activitystreams#",
-                "Note": "as:Note"
-            })),
+            ContextSource::WithAlias {
+                uri: "https://www.w3.org/ns/activitystreams#".to_string(),
+                alias: "as".to_string(),
+                terms: serde_json::json!({
+                    "Note": "as:Note"
+                }),
+            },
         );
         builder.add_expose_value("https://nonexistent.example.com#term");
         builder.set_serializer_name("test_output");
@@ -421,9 +554,13 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "id": "@id"
-            })),
+            ContextSource::WithAlias {
+                uri: "https://example.com/ns#".to_string(),
+                alias: "ex".to_string(),
+                terms: serde_json::json!({
+                    "id": "@id"
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -449,9 +586,13 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "type": "@type"
-            })),
+            ContextSource::WithAlias {
+                uri: "https://example.com/ns#".to_string(),
+                alias: "ex".to_string(),
+                terms: serde_json::json!({
+                    "type": "@type"
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         let result = builder.generate();
@@ -479,9 +620,13 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "fn": {"@id": "https://example.com#fn"}
-            })),
+            ContextSource::WithAlias {
+                uri: "https://example.com/ns#".to_string(),
+                alias: "ex".to_string(),
+                terms: serde_json::json!({
+                    "fn": {"@id": "https://example.com#fn"}
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         let result = builder.generate();
@@ -502,11 +647,14 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "sec": "https://w3id.org/security#",
-                "publicKey": {"@id": "sec:publicKey", "@type": "@id"},
-                "owner": {"@id": "sec:owner", "@type": "@id"}
-            })),
+            ContextSource::WithAlias {
+                uri: "https://w3id.org/security#".to_string(),
+                alias: "sec".to_string(),
+                terms: serde_json::json!({
+                    "publicKey": {"@id": "sec:publicKey", "@type": "@id"},
+                    "owner": {"@id": "sec:owner", "@type": "@id"}
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -536,12 +684,15 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "id": "@id",
-                "as": "https://www.w3.org/ns/activitystreams#",
-                "Note": "as:Note",
-                "name": {"@id": "as:name"}
-            })),
+            ContextSource::WithAlias {
+                uri: "https://www.w3.org/ns/activitystreams#".to_string(),
+                alias: "as".to_string(),
+                terms: serde_json::json!({
+                    "id": "@id",
+                    "Note": "as:Note",
+                    "name": {"@id": "as:name"}
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -569,11 +720,14 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({
-                "id": "@id",
-                "as": "https://www.w3.org/ns/activitystreams#",
-                "Note": "as:Note"
-            })),
+            ContextSource::WithAlias {
+                uri: "https://www.w3.org/ns/activitystreams#".to_string(),
+                alias: "as".to_string(),
+                terms: serde_json::json!({
+                    "id": "@id",
+                    "Note": "as:Note"
+                }),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -604,7 +758,11 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({"id": "@id"})),
+            ContextSource::WithAlias {
+                uri: "https://example.com/ns#".to_string(),
+                alias: "ex".to_string(),
+                terms: serde_json::json!({"id": "@id"}),
+            },
         );
         builder.set_serializer_name("test_output");
         builder.generate().unwrap();
@@ -628,11 +786,690 @@ mod tests {
         let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
         builder.add_context(
             "test_ctx",
-            ContextSource::Inline(serde_json::json!({"id": "@id"})),
+            ContextSource::WithAlias {
+                uri: "https://example.com/ns#".to_string(),
+                alias: "ex".to_string(),
+                terms: serde_json::json!({"id": "@id"}),
+            },
         );
         // Do NOT set serializer_name
         let result = builder.generate();
         assert!(result.is_err(), "@serializer_name is required");
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    // === Task 3.1: Inherit mode helper tests ===
+
+    #[test]
+    fn unwrap_context_value_with_context_key() {
+        let value = serde_json::json!({
+            "@context": {
+                "as": "https://www.w3.org/ns/activitystreams#",
+                "Note": "as:Note"
+            }
+        });
+        let result = ContextBuilder::unwrap_context_value(&value);
+        assert!(result.is_object());
+        assert_eq!(result["as"], "https://www.w3.org/ns/activitystreams#");
+        assert_eq!(result["Note"], "as:Note");
+    }
+
+    #[test]
+    fn unwrap_context_value_without_context_key() {
+        let value = serde_json::json!({
+            "as": "https://www.w3.org/ns/activitystreams#",
+            "Note": "as:Note"
+        });
+        let result = ContextBuilder::unwrap_context_value(&value);
+        assert!(result.is_object());
+        assert_eq!(result["as"], "https://www.w3.org/ns/activitystreams#");
+    }
+
+    #[test]
+    fn merge_context_json_object_merge() {
+        let fetched = serde_json::json!({
+            "as": "https://www.w3.org/ns/activitystreams#",
+            "Note": "as:Note"
+        });
+        let overrides = serde_json::json!({
+            "manuallyApprovesFollowers": "as:manuallyApprovesFollowers"
+        });
+        let result = ContextBuilder::merge_context_json(&fetched, &overrides);
+        assert!(result.is_object());
+        let obj = result.as_object().unwrap();
+        assert!(obj.contains_key("as"));
+        assert!(obj.contains_key("Note"));
+        assert!(obj.contains_key("manuallyApprovesFollowers"));
+    }
+
+    #[test]
+    fn merge_context_json_override_existing_key() {
+        let fetched = serde_json::json!({
+            "as": "https://www.w3.org/ns/activitystreams#",
+            "Note": "as:Note"
+        });
+        let overrides = serde_json::json!({
+            "Note": "as:CustomNote"
+        });
+        let result = ContextBuilder::merge_context_json(&fetched, &overrides);
+        assert_eq!(result["Note"], "as:CustomNote");
+    }
+
+    #[test]
+    fn merge_context_json_array_appends_overrides() {
+        let fetched = serde_json::json!([
+            "https://www.w3.org/ns/activitystreams",
+            {"as": "https://www.w3.org/ns/activitystreams#"}
+        ]);
+        let overrides = serde_json::json!({
+            "custom": "as:custom"
+        });
+        let result = ContextBuilder::merge_context_json(&fetched, &overrides);
+        assert!(result.is_array());
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0], "https://www.w3.org/ns/activitystreams");
+        assert!(arr[2].is_object());
+        assert_eq!(arr[2]["custom"], "as:custom");
+    }
+
+    #[test]
+    fn merge_context_json_empty_overrides() {
+        let fetched = serde_json::json!({
+            "as": "https://www.w3.org/ns/activitystreams#",
+            "Note": "as:Note"
+        });
+        let overrides = serde_json::json!({});
+        let result = ContextBuilder::merge_context_json(&fetched, &overrides);
+        assert_eq!(result, fetched);
+    }
+
+    fn make_cache_file(tmp_dir: &std::path::Path, url: &str, content: &serde_json::Value) {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        let cache_dir = tmp_dir.join(".ld_emit_cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let mut hasher = DefaultHasher::new();
+        url.hash(&mut hasher);
+        let hash = hasher.finish();
+        let cache_file = cache_dir.join(format!("{:016x}.json", hash));
+        fs::write(&cache_file, serde_json::to_string(content).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn inherit_mode_original_json_is_array_when_overrides_present() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_inherit_original_json");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let url = "https://example.com/test-context";
+        let context_json = serde_json::json!({
+            "@context": {
+                "as": "https://www.w3.org/ns/activitystreams#",
+                "Note": "as:Note",
+                "Person": "as:Person"
+            }
+        });
+        make_cache_file(&tmp_dir, url, &context_json);
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "test_ctx",
+            ContextSource::Inherit {
+                url: url.to_string(),
+                overrides: serde_json::json!({
+                    "custom": "as:custom"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("Inherit mode generated code should be valid Rust");
+
+        // Should have the context types
+        assert!(content.contains("pub struct TestCtx"));
+        assert!(content.contains("pub trait HasTestCtx"));
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn inherit_mode_empty_overrides_produces_url_string() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_inherit_empty_overrides");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let url = "https://example.com/test-context2";
+        let context_json = serde_json::json!({
+            "@context": {
+                "as": "https://www.w3.org/ns/activitystreams#",
+                "Note": "as:Note"
+            }
+        });
+        make_cache_file(&tmp_dir, url, &context_json);
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "test_ctx",
+            ContextSource::Inherit {
+                url: url.to_string(),
+                overrides: serde_json::json!({}),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("Inherit mode with empty overrides should be valid Rust");
+
+        // With empty overrides, original_json should be just the URL string
+        assert!(
+            content.contains("https://example.com/test-context2"),
+            "Empty overrides inherit should include URL. Code:\n{}",
+            content
+        );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    // === Task 3.2: WithAlias mode tests ===
+
+    #[test]
+    fn build_with_alias_json_creates_correct_structure() {
+        let terms = serde_json::json!({
+            "discoverable": "toot:discoverable",
+            "featured": {"@id": "toot:featured", "@type": "@id"}
+        });
+        let result = ContextBuilder::build_with_alias_json(
+            "http://joinmastodon.org/ns#",
+            "toot",
+            &terms,
+        );
+        assert!(result.is_object());
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["toot"], "http://joinmastodon.org/ns#");
+        assert_eq!(obj["discoverable"], "toot:discoverable");
+        assert!(obj["featured"].is_object());
+    }
+
+    #[test]
+    fn with_alias_mode_generates_valid_code() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_with_alias");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "toot_ext",
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("WithAlias mode generated code should be valid Rust");
+
+        assert!(content.contains("pub struct TootExt"));
+        assert!(content.contains("pub trait HasTootExt"));
+        assert!(content.contains("pub const DISCOVERABLE"));
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn with_alias_mode_name_differs_from_alias() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_with_alias_diff_name");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "mastodon_ext",
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("WithAlias with different name should be valid Rust");
+
+        // Module name comes from context name, not alias
+        assert!(content.contains("pub struct MastodonExt"));
+        assert!(content.contains("pub trait HasMastodonExt"));
+        // But JSON-LD prefix comes from alias
+        assert!(content.contains("http://joinmastodon.org/ns#"));
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn with_alias_mode_same_name_and_alias() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_with_alias_same");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "toot",
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("WithAlias with same name and alias should be valid Rust");
+
+        assert!(content.contains("pub struct Toot"));
+        assert!(content.contains("pub trait HasToot"));
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    // === Task 4: Macro new syntax pattern tests ===
+
+    #[test]
+    fn macro_fetch_only_syntax() {
+        let dir = OsString::from("/tmp/test_out");
+        let mut builder = ContextBuilder::new(&dir);
+        // Simulate: activity_streams = "https://www.w3.org/ns/activitystreams"
+        crate::__process_context_items!(builder,
+            activity_streams = "https://www.w3.org/ns/activitystreams"
+        );
+        assert_eq!(builder.contexts.len(), 1);
+        assert_eq!(builder.contexts[0].0, "activity_streams");
+        assert!(matches!(
+            &builder.contexts[0].1,
+            ContextSource::Url(u) if u == "https://www.w3.org/ns/activitystreams"
+        ));
+    }
+
+    #[test]
+    fn macro_inherit_syntax() {
+        let dir = OsString::from("/tmp/test_out");
+        let mut builder = ContextBuilder::new(&dir);
+        // Simulate: activity_streams = "https://www.w3.org/ns/activitystreams" inherit: { "custom": "as:custom" }
+        crate::__process_context_items!(builder,
+            activity_streams = "https://www.w3.org/ns/activitystreams" inherit: {
+                "custom": "as:custom"
+            }
+        );
+        assert_eq!(builder.contexts.len(), 1);
+        assert_eq!(builder.contexts[0].0, "activity_streams");
+        assert!(matches!(&builder.contexts[0].1, ContextSource::Inherit { .. }));
+        if let ContextSource::Inherit { url, overrides } = &builder.contexts[0].1 {
+            assert_eq!(url, "https://www.w3.org/ns/activitystreams");
+            assert!(overrides.is_object());
+            assert_eq!(overrides["custom"], "as:custom");
+        }
+    }
+
+    #[test]
+    fn macro_with_alias_syntax() {
+        let dir = OsString::from("/tmp/test_out");
+        let mut builder = ContextBuilder::new(&dir);
+        // Simulate: toot_ext = "http://joinmastodon.org/ns#" with toot: { "discoverable": "toot:discoverable" }
+        crate::__process_context_items!(builder,
+            toot_ext = "http://joinmastodon.org/ns#" with toot: {
+                "discoverable": "toot:discoverable"
+            }
+        );
+        assert_eq!(builder.contexts.len(), 1);
+        assert_eq!(builder.contexts[0].0, "toot_ext");
+        assert!(matches!(&builder.contexts[0].1, ContextSource::WithAlias { .. }));
+        if let ContextSource::WithAlias { uri, alias, terms } = &builder.contexts[0].1 {
+            assert_eq!(uri, "http://joinmastodon.org/ns#");
+            assert_eq!(alias, "toot");
+            assert!(terms.is_object());
+            assert_eq!(terms["discoverable"], "toot:discoverable");
+        }
+    }
+
+    #[test]
+    fn macro_mixed_syntax_with_directives() {
+        let dir = OsString::from("/tmp/test_out");
+        let mut builder = ContextBuilder::new(&dir);
+        crate::__process_context_items!(builder,
+            @serializer_name "test_output",
+            activity_streams = "https://www.w3.org/ns/activitystreams",
+            toot_ext = "http://joinmastodon.org/ns#" with toot: {
+                "discoverable": "toot:discoverable"
+            },
+            @expose_value {
+                "https://www.w3.org/ns/activitystreams#content",
+            }
+        );
+        assert_eq!(builder.contexts.len(), 2);
+        assert_eq!(builder.contexts[0].0, "activity_streams");
+        assert!(matches!(&builder.contexts[0].1, ContextSource::Url(_)));
+        assert_eq!(builder.contexts[1].0, "toot_ext");
+        assert!(matches!(&builder.contexts[1].1, ContextSource::WithAlias { .. }));
+        assert_eq!(builder.expose_values.len(), 1);
+    }
+
+    #[test]
+    fn macro_inherit_with_trailing_comma() {
+        let dir = OsString::from("/tmp/test_out");
+        let mut builder = ContextBuilder::new(&dir);
+        crate::__process_context_items!(builder,
+            ctx1 = "https://example.com/ctx1" inherit: {
+                "a": "b"
+            },
+            ctx2 = "https://example.com/ctx2"
+        );
+        assert_eq!(builder.contexts.len(), 2);
+        assert!(matches!(&builder.contexts[0].1, ContextSource::Inherit { .. }));
+        assert!(matches!(&builder.contexts[1].1, ContextSource::Url(_)));
+    }
+
+    #[test]
+    fn macro_with_alias_trailing_comma() {
+        let dir = OsString::from("/tmp/test_out");
+        let mut builder = ContextBuilder::new(&dir);
+        crate::__process_context_items!(builder,
+            ctx1 = "http://example.com/ns#" with ex: {
+                "term": "ex:term"
+            },
+            ctx2 = "https://example.com/ctx2"
+        );
+        assert_eq!(builder.contexts.len(), 2);
+        assert!(matches!(&builder.contexts[0].1, ContextSource::WithAlias { .. }));
+        assert!(matches!(&builder.contexts[1].1, ContextSource::Url(_)));
+    }
+
+    // === Task 5.2: Integration tests ===
+
+    #[test]
+    fn integration_inherit_e2e_pipeline() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_inherit_e2e");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let url = "https://example.com/as-context";
+        let context_json = serde_json::json!({
+            "@context": {
+                "as": "https://www.w3.org/ns/activitystreams#",
+                "id": "@id",
+                "type": "@type",
+                "Note": "as:Note",
+                "Person": "as:Person",
+                "name": {"@id": "as:name"},
+                "actor": {"@id": "as:actor", "@type": "@id"},
+                "content": "as:content"
+            }
+        });
+        make_cache_file(&tmp_dir, url, &context_json);
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "activity_streams",
+            ContextSource::Inherit {
+                url: url.to_string(),
+                overrides: serde_json::json!({
+                    "manuallyApprovesFollowers": "as:manuallyApprovesFollowers"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("Inherit E2E should generate valid Rust");
+
+        // Correct struct/trait generation
+        assert!(content.contains("pub struct ActivityStreams<S = ()>"));
+        assert!(content.contains("pub trait HasActivityStreams {}"));
+        assert!(content.contains("pub trait ActivityStreamsExt {"));
+
+        // Terms from fetched context
+        assert!(content.contains("pub const NOTE"));
+        assert!(content.contains("pub const PERSON"));
+        assert!(content.contains("fn name("));
+        assert!(content.contains("fn actor("));
+
+        // Custom term from overrides merged into terms
+        assert!(content.contains("pub const MANUALLY_APPROVES_FOLLOWERS"));
+
+        // ContextSerializer impl present
+        assert!(
+            content.contains("for ActivityStreams<S>"),
+            "Should contain ContextSerializer impl for ActivityStreams"
+        );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn integration_with_e2e_pipeline() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_with_e2e");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "toot_ext",
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable",
+                    "featured": {"@id": "toot:featured", "@type": "@id"}
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("WithAlias E2E should generate valid Rust");
+
+        // Struct/trait
+        assert!(content.contains("pub struct TootExt<S = ()>"));
+        assert!(content.contains("pub trait HasTootExt {}"));
+
+        // SimpleTerm from compact IRI
+        assert!(content.contains("pub const DISCOVERABLE"));
+
+        // ExtendedTerm with @type: @id generates both setter and _object variant
+        assert!(content.contains("fn featured("));
+        assert!(content.contains("fn featured_object"));
+
+        // original_json includes the prefix in ContextSerializer
+        assert!(content.contains("http://joinmastodon.org/ns#"));
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn integration_inherit_empty_block_equals_fetch_only() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_inherit_empty_eq_fetch");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let url = "https://example.com/empty-inherit-ctx";
+        let context_json = serde_json::json!({
+            "@context": {
+                "ex": "https://example.com/ns#",
+                "Term": "ex:Term"
+            }
+        });
+        make_cache_file(&tmp_dir, url, &context_json);
+
+        // inherit: {} (empty)
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "test_ctx",
+            ContextSource::Inherit {
+                url: url.to_string(),
+                overrides: serde_json::json!({}),
+            },
+        );
+        builder.set_serializer_name("test_inherit_empty");
+        builder.generate().unwrap();
+        let inherit_content = fs::read_to_string(tmp_dir.join("test_inherit_empty.rs")).unwrap();
+
+        // Url (fetch-only)
+        let mut builder2 = ContextBuilder::new(tmp_dir.as_os_str());
+        builder2.add_context(
+            "test_ctx",
+            ContextSource::Url(url.to_string()),
+        );
+        builder2.set_serializer_name("test_fetch_only");
+        builder2.generate().unwrap();
+        let fetch_content = fs::read_to_string(tmp_dir.join("test_fetch_only.rs")).unwrap();
+
+        // Both should generate the same struct/trait structure
+        assert!(inherit_content.contains("pub struct TestCtx"));
+        assert!(fetch_content.contains("pub struct TestCtx"));
+        assert!(inherit_content.contains("pub const TERM"));
+        assert!(fetch_content.contains("pub const TERM"));
+
+        // Both should have valid Rust
+        syn::parse_file(&inherit_content).expect("inherit empty should be valid Rust");
+        syn::parse_file(&fetch_content).expect("fetch-only should be valid Rust");
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn integration_multi_context_inherit_with_fetch_only() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_multi_mode_mix");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let as_url = "https://example.com/as-multi";
+        let as_json = serde_json::json!({
+            "@context": {
+                "as": "https://www.w3.org/ns/activitystreams#",
+                "Note": "as:Note",
+                "name": {"@id": "as:name"}
+            }
+        });
+        make_cache_file(&tmp_dir, as_url, &as_json);
+
+        let sec_url = "https://example.com/sec-multi";
+        let sec_json = serde_json::json!({
+            "@context": {
+                "sec": "https://w3id.org/security#",
+                "publicKey": {"@id": "sec:publicKey", "@type": "@id"}
+            }
+        });
+        make_cache_file(&tmp_dir, sec_url, &sec_json);
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        // inherit mode
+        builder.add_context(
+            "activity_streams",
+            ContextSource::Inherit {
+                url: as_url.to_string(),
+                overrides: serde_json::json!({
+                    "custom": "as:custom"
+                }),
+            },
+        );
+        // fetch-only mode
+        builder.add_context(
+            "security_v1",
+            ContextSource::Url(sec_url.to_string()),
+        );
+        // with mode
+        builder.add_context(
+            "toot_ext",
+            ContextSource::WithAlias {
+                uri: "http://joinmastodon.org/ns#".to_string(),
+                alias: "toot".to_string(),
+                terms: serde_json::json!({
+                    "discoverable": "toot:discoverable"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("Mixed multi-context should be valid Rust");
+
+        // All 3 context types present
+        assert!(content.contains("pub struct ActivityStreams<S = ()>"));
+        assert!(content.contains("pub struct SecurityV1<S = ()>"));
+        assert!(content.contains("pub struct TootExt<S = ()>"));
+
+        // Composed type
+        assert!(content.contains("pub type Context = ActivityStreams<SecurityV1<TootExt>>;"));
+
+        // Cross-forwarding
+        assert!(content.contains("HasSecurityV1 for ActivityStreams<S>"));
+        assert!(content.contains("HasTootExt for ActivityStreams<S>"));
+
+        // Terms from all modes
+        assert!(content.contains("pub const NOTE"));         // inherit (fetched)
+        assert!(content.contains("pub const CUSTOM"));       // inherit (override)
+        assert!(content.contains("fn public_key("));          // fetch-only
+        assert!(content.contains("pub const DISCOVERABLE")); // with
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn integration_inherit_array_expansion_in_context_serializer() {
+        let tmp_dir = std::env::temp_dir().join("ld_emit_test_inherit_array_expand");
+        let _ = fs::remove_dir_all(&tmp_dir);
+        fs::create_dir_all(&tmp_dir).unwrap();
+
+        let url = "https://example.com/array-expand-ctx";
+        let context_json = serde_json::json!({
+            "@context": {
+                "ex": "https://example.com/ns#",
+                "Thing": "ex:Thing"
+            }
+        });
+        make_cache_file(&tmp_dir, url, &context_json);
+
+        let mut builder = ContextBuilder::new(tmp_dir.as_os_str());
+        builder.add_context(
+            "test_ctx",
+            ContextSource::Inherit {
+                url: url.to_string(),
+                overrides: serde_json::json!({
+                    "custom": "ex:custom"
+                }),
+            },
+        );
+        builder.set_serializer_name("test_output");
+        builder.generate().unwrap();
+
+        let content = fs::read_to_string(tmp_dir.join("test_output.rs")).unwrap();
+        syn::parse_file(&content).expect("Array expansion should produce valid Rust");
+
+        // The generated ContextSerializer should use extend for Array original_json
+        // (inherit with non-empty overrides produces ["url", {overrides}] array)
+        assert!(
+            content.contains("extend"),
+            "inherit mode with overrides should generate extend in ContextSerializer. Code:\n{}",
+            content
+        );
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }

@@ -44,8 +44,9 @@ impl LDSerializable for Person {
             .outbox(&self.outbox)
             .discoverable_with(self.discoverable)
             .public_key_object(|key| {
-                key.id(&self.public_key_id)
+                key
                     .kind(&[&security_v1::KEY])
+                    .id(&self.public_key_id)
                     .owner(&self.id)
                     .public_key_pem(&self.public_key_pem);
             });

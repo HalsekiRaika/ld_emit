@@ -13,8 +13,6 @@ impl ContextParser {
                 position: None,
             })?;
 
-        let original_json = value.clone();
-
         // Unwrap @context key if present
         let context_value = value
             .as_object()
@@ -29,7 +27,6 @@ impl ContextParser {
         Self::parse_context_value(&context_value, &mut resolver, &mut terms)?;
 
         Ok(ParsedContext {
-            source: ContextSource::Inline(original_json),
             terms,
             original_json: context_value,
         })

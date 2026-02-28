@@ -27,12 +27,11 @@ pub use serde_json;
 /// ld_emit_build::ld_context! {
 ///     @serializer_name "activity_pub",
 ///     @export_dir "src/generated",
-///     activity_streams: {
-///         "id": "@id",
-///         "type": "@type",
-///         "as": "https://www.w3.org/ns/activitystreams#",
-///         "Note": "as:Note",
-///         "name": {"@id": "as:name"},
+///     activity_streams = "https://www.w3.org/ns/activitystreams" inherit: {
+///         "manuallyApprovesFollowers": "as:manuallyApprovesFollowers",
+///     },
+///     toot_ext = "http://joinmastodon.org/ns#" with toot: {
+///         "discoverable": "toot:discoverable",
 ///     },
 ///     @expose_value {
 ///         "https://www.w3.org/ns/activitystreams#content",
@@ -48,13 +47,19 @@ pub use serde_json;
 /// pub use self::generated::*;
 /// ```
 ///
+/// # Context Declaration Modes
+///
+/// | Syntax | Description |
+/// |--------|-------------|
+/// | `name = "url"` | **Fetch-only mode.** Fetches all terms from the remote JSON-LD context URL |
+/// | `name = "url" inherit: { ... }` | **Inherit mode.** Fetches all terms from URL, then merges custom terms from the block |
+/// | `name = "uri" with alias: { ... }` | **With mode.** No remote fetch; declares a namespace URI with alias prefix and manual term definitions |
+///
 /// # Directives
 ///
 /// | Directive | Description |
 /// |-----------|-------------|
 /// | `@serializer_name "name"` | **Required.** Output filename stem (`{name}.rs` in `OUT_DIR`) |
-/// | `name: "url"` | URL context (fetched at build time) |
-/// | `name: { ... }` | Inline JSON-LD context object |
 /// | `@expose_value { "iri", ... }` | Generate `_with` setter methods for the specified IRIs |
 /// | `@rename { "from" -> "to", ... }` | Rename terms to alternative Rust identifiers (see below) |
 /// | `@export_dir "dir"` | Also write the generated file to a source-tree directory (see below) |
@@ -63,22 +68,7 @@ pub use serde_json;
 ///
 /// When a JSON-LD keyword alias (e.g., `"type": "@type"`, `"id": "@id"`) maps to a
 /// Rust reserved word, the generated method automatically uses a raw identifier (`r#type`,
-/// `r#as`, etc.). No `@rename` directive is needed:
-///
-/// ```ignore
-/// // In build.rs — no @rename needed for keyword aliases
-/// activity_streams: {
-///     "type": "@type",  // generates fn r#type(...)
-///     "id": "@id",      // "id" is not reserved, generates fn id(...)
-///     // ...
-/// }
-/// ```
-///
-/// ```ignore
-/// // In your serializer implementation
-/// ser.r#type(&[&activity_streams::Person])
-///    .id(&self.id);
-/// ```
+/// `r#as`, etc.). No `@rename` directive is needed.
 ///
 /// For non-keyword terms (`ExtendedTerm`) that collide with reserved words, `@rename`
 /// is still required:
@@ -86,22 +76,6 @@ pub use serde_json;
 /// ```ignore
 /// @rename {
 ///     "match" -> "match_value"
-/// }
-/// ```
-///
-/// # Multiple `ld_context!` Invocations
-///
-/// Each `ld_context!` call must have a unique `@serializer_name`. This allows multiple
-/// independent invocations in the same `build.rs` without overwriting each other:
-///
-/// ```ignore
-/// ld_emit_build::ld_context! {
-///     @serializer_name "activity_pub",
-///     activity_streams: { ... },
-/// }
-/// ld_emit_build::ld_context! {
-///     @serializer_name "activitypub_gen",
-///     activitystream: "https://www.w3.org/ns/activitystreams#",
 /// }
 /// ```
 ///
@@ -114,36 +88,8 @@ pub use serde_json;
 ///
 /// ## JetBrains IDE (RustRover / IntelliJ Rust)
 ///
-/// `ld_emit::include_ld!` internally expands to `include!(concat!(env!("OUT_DIR"), ...))`.
-/// IntelliJ Rust plugin may not resolve `env!("OUT_DIR")` during static analysis,
-/// which can prevent code completion and navigation for the generated symbols.
-/// This is a known limitation of the IntelliJ Rust plugin
-/// (see [intellij-rust#1908](https://github.com/intellij-rust/intellij-rust/issues/1908),
-/// [intellij-rust#8780](https://github.com/intellij-rust/intellij-rust/issues/8780)).
-///
-/// To work around this, use `@export_dir` to also write the generated file into your
-/// source tree, then use `#[path]` so the IDE can resolve it directly:
-///
-/// In `build.rs`:
-/// ```ignore
-/// ld_emit_build::ld_context! {
-///     @serializer_name "activity_pub",
-///     @export_dir "src/generated",
-///     activity_streams: { ... },
-///     // ...
-/// }
-/// ```
-///
-/// In your crate's source (e.g. `src/main.rs` or `src/lib.rs`):
-/// ```ignore
-/// #[path = "generated/activity_pub.rs"]
-/// pub mod generated;
-/// pub use self::generated::*;
-/// ```
-///
-/// The `@export_dir` path is relative to `CARGO_MANIFEST_DIR`. The output filename is
-/// derived from `@serializer_name`. Remember to add the generated directory to
-/// `.gitignore` (e.g. `src/generated/`).
+/// Use `@export_dir` to also write the generated file into your source tree, then use
+/// `#[path]` so the IDE can resolve it directly.
 #[macro_export]
 macro_rules! ld_context {
     ( $( $item:tt )* ) => {{
@@ -161,6 +107,20 @@ macro_rules! ld_context {
 macro_rules! __process_context_items {
     // Base case: no more items
     ($builder:ident,) => {};
+
+    // === Error detection arms (highest priority) ===
+
+    // inherit + with simultaneous use, with trailing comma
+    ($builder:ident, $name:ident = $url:literal inherit : { $($json:tt)* } with $alias:ident : { $($json2:tt)* } , $($rest:tt)*) => {
+        compile_error!("inherit と with は同時に使用できません");
+    };
+
+    // inherit + with simultaneous use, last item
+    ($builder:ident, $name:ident = $url:literal inherit : { $($json:tt)* } with $alias:ident : { $($json2:tt)* }) => {
+        compile_error!("inherit と with は同時に使用できません");
+    };
+
+    // === Existing directives (unchanged) ===
 
     // @serializer_name "name" with trailing comma
     ($builder:ident, @serializer_name $name:literal , $( $rest:tt )*) => {
@@ -216,25 +176,62 @@ macro_rules! __process_context_items {
         $crate::__process_context_items!($builder, $($rest)*);
     };
 
-    // name: { ... }, (inline context object)
-    ($builder:ident, $name:ident : { $( $json:tt )* } , $( $rest:tt )*) => {
+    // === inherit mode ===
+
+    // name = "url" inherit: { ... }, ...rest
+    ($builder:ident, $name:ident = $url:literal inherit : { $($json:tt)* } , $($rest:tt)*) => {
         $builder.add_context(
             stringify!($name),
-            $crate::ContextSource::Inline($crate::serde_json::json!({ $($json)* })),
+            $crate::ContextSource::Inherit {
+                url: $url.to_string(),
+                overrides: $crate::serde_json::json!({ $($json)* }),
+            },
         );
         $crate::__process_context_items!($builder, $($rest)*);
     };
 
-    // name: { ... } (inline context object, last item without trailing comma)
-    ($builder:ident, $name:ident : { $( $json:tt )* }) => {
+    // name = "url" inherit: { ... } (last item)
+    ($builder:ident, $name:ident = $url:literal inherit : { $($json:tt)* }) => {
         $builder.add_context(
             stringify!($name),
-            $crate::ContextSource::Inline($crate::serde_json::json!({ $($json)* })),
+            $crate::ContextSource::Inherit {
+                url: $url.to_string(),
+                overrides: $crate::serde_json::json!({ $($json)* }),
+            },
         );
     };
 
-    // name: "url", (URL context)
-    ($builder:ident, $name:ident : $url:literal , $( $rest:tt )*) => {
+    // === with mode ===
+
+    // name = "uri" with alias: { ... }, ...rest
+    ($builder:ident, $name:ident = $url:literal with $alias:ident : { $($json:tt)* } , $($rest:tt)*) => {
+        $builder.add_context(
+            stringify!($name),
+            $crate::ContextSource::WithAlias {
+                uri: $url.to_string(),
+                alias: stringify!($alias).to_string(),
+                terms: $crate::serde_json::json!({ $($json)* }),
+            },
+        );
+        $crate::__process_context_items!($builder, $($rest)*);
+    };
+
+    // name = "uri" with alias: { ... } (last item)
+    ($builder:ident, $name:ident = $url:literal with $alias:ident : { $($json:tt)* }) => {
+        $builder.add_context(
+            stringify!($name),
+            $crate::ContextSource::WithAlias {
+                uri: $url.to_string(),
+                alias: stringify!($alias).to_string(),
+                terms: $crate::serde_json::json!({ $($json)* }),
+            },
+        );
+    };
+
+    // === fetch-only mode (lowest priority) ===
+
+    // name = "url", ...rest
+    ($builder:ident, $name:ident = $url:literal , $($rest:tt)*) => {
         $builder.add_context(
             stringify!($name),
             $crate::ContextSource::Url($url.to_string()),
@@ -242,8 +239,8 @@ macro_rules! __process_context_items {
         $crate::__process_context_items!($builder, $($rest)*);
     };
 
-    // name: "url" (URL context, last item without trailing comma)
-    ($builder:ident, $name:ident : $url:literal) => {
+    // name = "url" (last item)
+    ($builder:ident, $name:ident = $url:literal) => {
         $builder.add_context(
             stringify!($name),
             $crate::ContextSource::Url($url.to_string()),
@@ -329,11 +326,9 @@ mod tests {
     #[test]
     fn parsed_context_creation() {
         let pc = ParsedContext {
-            source: ContextSource::Url("https://www.w3.org/ns/activitystreams".to_string()),
             terms: vec![],
             original_json: serde_json::json!("https://www.w3.org/ns/activitystreams"),
         };
-        assert!(matches!(pc.source, ContextSource::Url(_)));
         assert!(pc.terms.is_empty());
     }
 
@@ -342,8 +337,18 @@ mod tests {
         let url = ContextSource::Url("https://example.com".to_string());
         assert!(matches!(url, ContextSource::Url(_)));
 
-        let inline = ContextSource::Inline(serde_json::json!({"key": "value"}));
-        assert!(matches!(inline, ContextSource::Inline(_)));
+        let inherit = ContextSource::Inherit {
+            url: "https://www.w3.org/ns/activitystreams".to_string(),
+            overrides: serde_json::json!({"manuallyApprovesFollowers": "as:manuallyApprovesFollowers"}),
+        };
+        assert!(matches!(inherit, ContextSource::Inherit { .. }));
+
+        let with_alias = ContextSource::WithAlias {
+            uri: "http://joinmastodon.org/ns#".to_string(),
+            alias: "toot".to_string(),
+            terms: serde_json::json!({"discoverable": "toot:discoverable"}),
+        };
+        assert!(matches!(with_alias, ContextSource::WithAlias { .. }));
     }
 
     #[test]
