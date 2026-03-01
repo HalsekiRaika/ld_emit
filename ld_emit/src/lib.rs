@@ -176,9 +176,41 @@ fn serialize_to_map<T: LDSerializable>(
     value: &T,
 ) -> Result<serde_json::Map<String, serde_json::Value>, LDError> {
     let mut serializer = ObjectSerializer::<T::Context>::new();
-    serializer.field("@context", T::Context::context_json());
+    serializer.field("@context", flatten_context_array(T::Context::context_json()));
     value.ld_serialize(&mut serializer)?;
     Ok(serializer.into_map())
+}
+
+/// Flatten a `@context` array by merging all Object entries into a single Object.
+///
+/// String entries (URL references) are kept as separate array elements.
+/// Multiple Object entries are merged into one to reduce payload size.
+fn flatten_context_array(value: serde_json::Value) -> serde_json::Value {
+    let arr = match value {
+        serde_json::Value::Array(a) => a,
+        other => return other,
+    };
+
+    let mut non_objects: Vec<serde_json::Value> = Vec::new();
+    let mut merged_obj = serde_json::Map::new();
+
+    for item in arr {
+        match item {
+            serde_json::Value::Object(map) => {
+                for (k, v) in map {
+                    merged_obj.insert(k, v);
+                }
+            }
+            other => non_objects.push(other),
+        }
+    }
+
+    let mut result = non_objects;
+    if !merged_obj.is_empty() {
+        result.push(serde_json::Value::Object(merged_obj));
+    }
+
+    serde_json::Value::Array(result)
 }
 
 // === include_ld! Macro ===
@@ -652,5 +684,106 @@ mod tests {
         );
         assert_eq!(parsed["content"], serde_json::json!("Hello World"));
         assert_eq!(parsed["author"]["name"], serde_json::json!("Alice"));
+    }
+
+    // === flatten_context_array Tests ===
+
+    #[test]
+    fn flatten_context_array_merges_multiple_objects() {
+        let input = serde_json::json!([
+            {"as": "https://www.w3.org/ns/activitystreams#", "Note": "as:Note"},
+            {"sec": "https://w3id.org/security#", "Key": "sec:Key"},
+            {"toot": "http://joinmastodon.org/ns#", "discoverable": "toot:discoverable"}
+        ]);
+        let result = flatten_context_array(input);
+        assert_eq!(
+            result,
+            serde_json::json!([{
+                "as": "https://www.w3.org/ns/activitystreams#",
+                "Note": "as:Note",
+                "sec": "https://w3id.org/security#",
+                "Key": "sec:Key",
+                "toot": "http://joinmastodon.org/ns#",
+                "discoverable": "toot:discoverable"
+            }])
+        );
+    }
+
+    #[test]
+    fn flatten_context_array_keeps_strings_separate() {
+        let input = serde_json::json!([
+            "https://www.w3.org/ns/activitystreams",
+            {"sec": "https://w3id.org/security#", "Key": "sec:Key"},
+            {"toot": "http://joinmastodon.org/ns#"}
+        ]);
+        let result = flatten_context_array(input);
+        assert_eq!(
+            result,
+            serde_json::json!([
+                "https://www.w3.org/ns/activitystreams",
+                {
+                    "sec": "https://w3id.org/security#",
+                    "Key": "sec:Key",
+                    "toot": "http://joinmastodon.org/ns#"
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn flatten_context_array_single_object_keeps_array() {
+        let input = serde_json::json!([{"as": "https://www.w3.org/ns/activitystreams#"}]);
+        let result = flatten_context_array(input);
+        assert_eq!(
+            result,
+            serde_json::json!([{"as": "https://www.w3.org/ns/activitystreams#"}])
+        );
+    }
+
+    #[test]
+    fn flatten_context_array_single_string_keeps_array() {
+        let input = serde_json::json!(["https://www.w3.org/ns/activitystreams"]);
+        let result = flatten_context_array(input);
+        assert_eq!(
+            result,
+            serde_json::json!(["https://www.w3.org/ns/activitystreams"])
+        );
+    }
+
+    #[test]
+    fn flatten_context_array_non_array_passthrough() {
+        let input = serde_json::json!("https://www.w3.org/ns/activitystreams");
+        let result = flatten_context_array(input);
+        assert_eq!(
+            result,
+            serde_json::json!("https://www.w3.org/ns/activitystreams")
+        );
+    }
+
+    #[test]
+    fn flatten_context_array_empty_stays_empty() {
+        let input = serde_json::json!([]);
+        let result = flatten_context_array(input);
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[test]
+    fn flatten_context_array_mixed_strings_and_objects() {
+        // inherit mode: ["url", {overrides}] + with mode objects
+        let input = serde_json::json!([
+            "https://example.com/context",
+            {"custom": "value"},
+            "https://other.example.com/context",
+            {"sec": "https://w3id.org/security#"}
+        ]);
+        let result = flatten_context_array(input);
+        assert_eq!(
+            result,
+            serde_json::json!([
+                "https://example.com/context",
+                "https://other.example.com/context",
+                {"custom": "value", "sec": "https://w3id.org/security#"}
+            ])
+        );
     }
 }

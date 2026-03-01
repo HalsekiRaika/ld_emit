@@ -85,7 +85,10 @@ impl ContextBuilder {
             let parsed = match source {
                 ContextSource::Url(url) => {
                     let json = fetcher.fetch(url)?;
-                    ContextParser::parse(&json)?
+                    let mut parsed = ContextParser::parse(&json)?;
+                    // @context にはURL文字列のみを出力する（フェッチ内容は展開しない）
+                    parsed.original_json = serde_json::Value::String(url.clone());
+                    parsed
                 }
                 ContextSource::Inherit { url, overrides } => {
                     // Fetch the remote context

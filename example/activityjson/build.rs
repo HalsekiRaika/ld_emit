@@ -39,11 +39,19 @@ fn main() {
     ld_emit_build::ld_context! {
         @serializer_name "activitypub_gen",
         @export_dir "src/generated",
-        activitystream = "https://www.w3.org/ns/activitystreams#",
-        w3idsecurty = "https://w3id.org/security#",
+        activity_streams = "https://www.w3.org/ns/activitystreams#",
+        security_v1 = "https://w3id.org/security#" with sec: {
+            "Key": "sec:Key",
+            "publicKey": {"@id": "sec:publicKey", "@type": "@id"},
+            "publicKeyPem": {"@id": "sec:publicKeyPem"},
+            "owner": {"@id": "sec:owner", "@type": "@id"}
+        },
         @expose_value {
             "https://www.w3.org/ns/activitystreams#content",
             "https://www.w3.org/ns/activitystreams#name",
+        }
+        @rename {
+            "type" -> "kind"
         }
     }
 }

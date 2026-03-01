@@ -2,7 +2,7 @@ use ld_emit::{LDError, LDSerializable, ObjectSerializer};
 
 // Include generated code from build.rs
 // Uses @include_file to write to src/generated/ for JetBrains IDE compatibility
-// #[path = "generated/ld_emit_generated.rs"]
+// #[path = "generated/activitypub_gen.rs"]
 // pub mod generated;
 //
 // pub use self::generated::*;
