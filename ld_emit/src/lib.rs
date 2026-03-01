@@ -172,6 +172,11 @@ pub fn to_string_pretty<T: LDSerializable>(value: &T) -> Result<String, LDError>
     serde_json::to_string_pretty(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
 }
 
+pub fn to_value<T: LDSerializable>(value: &T) -> Result<serde_json::Value, LDError> {
+    let map = serialize_to_map(value)?;
+    Ok(serde_json::Value::Object(map))
+}
+
 fn serialize_to_map<T: LDSerializable>(
     value: &T,
 ) -> Result<serde_json::Map<String, serde_json::Value>, LDError> {
@@ -684,6 +689,40 @@ mod tests {
         );
         assert_eq!(parsed["content"], serde_json::json!("Hello World"));
         assert_eq!(parsed["author"]["name"], serde_json::json!("Alice"));
+    }
+
+    // === flatten_context_array Tests ===
+
+    // === to_value Tests ===
+
+    #[test]
+    fn to_value_returns_json_ld_value() {
+        struct TestCtx;
+        impl ContextSerializer for TestCtx {
+            fn context_json() -> serde_json::Value {
+                serde_json::json!(["https://www.w3.org/ns/activitystreams"])
+            }
+        }
+
+        struct MyNote;
+        impl LDSerializable for MyNote {
+            type Context = TestCtx;
+            fn ld_serialize(
+                &self,
+                serializer: &mut ObjectSerializer<Self::Context>,
+            ) -> Result<(), LDError> {
+                serializer.field("name", "Test Note");
+                Ok(())
+            }
+        }
+
+        let result = to_value(&MyNote).unwrap();
+        assert!(result.is_object());
+        assert_eq!(
+            result["@context"],
+            serde_json::json!(["https://www.w3.org/ns/activitystreams"])
+        );
+        assert_eq!(result["name"], serde_json::json!("Test Note"));
     }
 
     // === flatten_context_array Tests ===
