@@ -2,7 +2,7 @@ fn main() {
     ld_emit_build::ld_context! {
         @serializer_name "ld_emit_generated",
         @export_dir "src/generated",
-        activity_streams = "https://www.w3.org/ns/activitystreams#" with as: {
+        activity_streams = "https://www.w3.org/ns/activitystreams" with as: {
             "id": "@id",
             "type": "@type",
             "Note": "as:Note",
@@ -18,13 +18,13 @@ fn main() {
             "inbox": {"@id": "http://www.w3.org/ns/ldp#inbox", "@type": "@id"},
             "outbox": {"@id": "as:outbox", "@type": "@id"}
         },
-        security_v1 = "https://w3id.org/security#" with sec: {
+        security_v1 = "https://w3id.org/security" with sec: {
             "Key": "sec:Key",
             "publicKey": {"@id": "sec:publicKey", "@type": "@id"},
             "publicKeyPem": {"@id": "sec:publicKeyPem"},
             "owner": {"@id": "sec:owner", "@type": "@id"}
         },
-        toot_ext = "http://joinmastodon.org/ns#" with toot: {
+        toot_ext = "http://joinmastodon.org/ns" with toot: {
             "discoverable": "toot:discoverable",
             "featured": {"@id": "toot:featured", "@type": "@id"}
         },
@@ -39,8 +39,8 @@ fn main() {
     ld_emit_build::ld_context! {
         @serializer_name "activitypub_gen",
         @export_dir "src/generated",
-        activity_streams = "https://www.w3.org/ns/activitystreams#",
-        security_v1 = "https://w3id.org/security#" with sec: {
+        activity_streams = "https://www.w3.org/ns/activitystreams",
+        security_v1 = "https://w3id.org/security" with sec: {
             "Key": "sec:Key",
             "publicKey": {"@id": "sec:publicKey", "@type": "@id"},
             "publicKeyPem": {"@id": "sec:publicKeyPem"},

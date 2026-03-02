@@ -837,4 +837,70 @@ mod tests {
         let result = ContextParser::parse(json).unwrap();
         assert_eq!(result.original_json, serde_json::json!({"id": "@id"}));
     }
+
+    // Implicit prefix detection: URI without trailing # or /
+    #[test]
+    fn parse_prefix_without_fragment() {
+        let json = r#"{
+            "as": "https://www.w3.org/ns/activitystreams",
+            "Note": "as:Note",
+            "name": {"@id": "as:name"}
+        }"#;
+        let result = ContextParser::parse(json).unwrap();
+
+        // "as" should be detected as a prefix
+        let as_term = find_term(&result.terms, "as").unwrap();
+        assert!(
+            matches!(&as_term.kind, TermKind::Prefix { uri } if uri == "https://www.w3.org/ns/activitystreams")
+        );
+
+        // Compact IRIs should resolve using the fragment-less prefix
+        let note_term = find_term(&result.terms, "Note").unwrap();
+        match &note_term.kind {
+            TermKind::SimpleTerm { iri } => {
+                assert_eq!(iri, "https://www.w3.org/ns/activitystreamsNote");
+            }
+            other => panic!("Expected SimpleTerm, got {:?}", other),
+        }
+
+        let name_term = find_term(&result.terms, "name").unwrap();
+        match &name_term.kind {
+            TermKind::ExtendedTerm { id, .. } => {
+                assert_eq!(id, "https://www.w3.org/ns/activitystreamsname");
+            }
+            other => panic!("Expected ExtendedTerm, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_prefix_with_fragment_still_works() {
+        let json = r#"{
+            "as": "https://www.w3.org/ns/activitystreams#",
+            "Note": "as:Note"
+        }"#;
+        let result = ContextParser::parse(json).unwrap();
+
+        let as_term = find_term(&result.terms, "as").unwrap();
+        assert!(matches!(&as_term.kind, TermKind::Prefix { uri } if uri == "https://www.w3.org/ns/activitystreams#"));
+
+        let note_term = find_term(&result.terms, "Note").unwrap();
+        match &note_term.kind {
+            TermKind::SimpleTerm { iri } => {
+                assert_eq!(iri, "https://www.w3.org/ns/activitystreams#Note");
+            }
+            other => panic!("Expected SimpleTerm, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_full_iri_not_mistaken_as_prefix() {
+        // A full IRI value should not be treated as a prefix
+        let json = r#"{
+            "homepage": "http://xmlns.com/foaf/0.1/homepage"
+        }"#;
+        let result = ContextParser::parse(json).unwrap();
+        let term = find_term(&result.terms, "homepage").unwrap();
+        // No compact IRI references "homepage:..." so it stays as SimpleTerm
+        assert!(matches!(&term.kind, TermKind::SimpleTerm { .. }));
+    }
 }

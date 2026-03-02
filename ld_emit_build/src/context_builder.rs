@@ -225,8 +225,15 @@ impl ContextBuilder {
         alias: &str,
         terms: &serde_json::Value,
     ) -> serde_json::Value {
+        // Namespace URI must end with a separator for correct compact IRI expansion.
+        // Auto-append '#' if missing (e.g., "https://example.org/ns" → "https://example.org/ns#").
+        let normalized_uri = if uri.ends_with('#') || uri.ends_with('/') {
+            uri.to_string()
+        } else {
+            format!("{}#", uri)
+        };
         let mut map = serde_json::Map::new();
-        map.insert(alias.to_string(), serde_json::Value::String(uri.to_string()));
+        map.insert(alias.to_string(), serde_json::Value::String(normalized_uri));
         if let Some(term_obj) = terms.as_object() {
             for (key, val) in term_obj {
                 map.insert(key.clone(), val.clone());
@@ -998,6 +1005,32 @@ mod tests {
         assert_eq!(obj["toot"], "http://joinmastodon.org/ns#");
         assert_eq!(obj["discoverable"], "toot:discoverable");
         assert!(obj["featured"].is_object());
+    }
+
+    #[test]
+    fn build_with_alias_json_normalizes_uri_without_fragment() {
+        let terms = serde_json::json!({"Note": "as:Note"});
+        let result = ContextBuilder::build_with_alias_json(
+            "https://www.w3.org/ns/activitystreams",
+            "as",
+            &terms,
+        );
+        let obj = result.as_object().unwrap();
+        // URI should have # appended automatically
+        assert_eq!(obj["as"], "https://www.w3.org/ns/activitystreams#");
+        assert_eq!(obj["Note"], "as:Note");
+    }
+
+    #[test]
+    fn build_with_alias_json_preserves_uri_with_slash() {
+        let terms = serde_json::json!({"name": "schema:name"});
+        let result = ContextBuilder::build_with_alias_json(
+            "https://schema.org/",
+            "schema",
+            &terms,
+        );
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj["schema"], "https://schema.org/");
     }
 
     #[test]

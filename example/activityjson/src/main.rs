@@ -2,16 +2,16 @@ use ld_emit::{LDError, LDSerializable, ObjectSerializer};
 
 // Include generated code from build.rs
 // Uses @include_file to write to src/generated/ for JetBrains IDE compatibility
-// #[path = "generated/activitypub_gen.rs"]
-// pub mod generated;
+#[path = "generated/activitypub_gen.rs"]
+pub mod generated;
+
+pub use self::generated::*;
+
+// pub mod _another_import {
+//     ld_emit::include_ld!("ld_emit_generated");
+// }
 //
-// pub use self::generated::*;
-
-pub mod _another_import {
-    ld_emit::include_ld!("ld_emit_generated");
-}
-
-pub use _another_import::*;
+// pub use _another_import::*;
 
 
 /// A Mastodon-style ActivityPub Person actor.
@@ -37,12 +37,12 @@ impl LDSerializable for Person {
         ser
             .kind(&[&activity_streams::PERSON])
             .id(&self.id)
-            .name(&self.name)
-            .preferred_username(&self.preferred_username)
-            .summary(&self.summary)
+            .name_with(&self.name)
+            // .preferred_username(&self.preferred_username)
+            // .summary(&self.summary)
             .inbox(&self.inbox)
             .outbox(&self.outbox)
-            .discoverable_with(self.discoverable)
+            // .discoverable_with(self.discoverable)
             .public_key_object(|key| {
                 key
                     .kind(&[&security_v1::KEY])

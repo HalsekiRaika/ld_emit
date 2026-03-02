@@ -39,7 +39,7 @@ impl ContextParser {
     ) -> Result<(), LDBuildError> {
         match value {
             serde_json::Value::Object(map) => {
-                // First pass: collect all prefixes
+                // First pass: collect obvious prefixes (URI ends with # or /)
                 for (key, val) in map {
                     if let Some(uri) = val.as_str()
                         && Self::is_prefix_uri(uri)
@@ -49,7 +49,10 @@ impl ContextParser {
                     }
                 }
 
-                // Second pass: classify all entries
+                // Second pass: detect implicit prefixes via compact IRI usage
+                Self::detect_implicit_prefixes(map, resolver);
+
+                // Third pass: classify all entries
                 for (key, val) in map {
                     if let Some(td) = Self::classify_entry(key, val, resolver) {
                         terms.push(td);
@@ -67,6 +70,60 @@ impl ContextParser {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Detect prefixes that don't end with `#` or `/` but are referenced
+    /// by compact IRIs (e.g., `"as:Note"`) elsewhere in the context.
+    fn detect_implicit_prefixes(
+        map: &serde_json::Map<String, serde_json::Value>,
+        resolver: &mut PrefixResolver,
+    ) {
+        let mut used_prefixes = std::collections::HashSet::new();
+
+        for (_key, val) in map {
+            match val {
+                serde_json::Value::String(s) => {
+                    if let Some(prefix) = Self::extract_compact_iri_prefix(s) {
+                        used_prefixes.insert(prefix.to_string());
+                    }
+                }
+                serde_json::Value::Object(obj) => {
+                    if let Some(serde_json::Value::String(id)) = obj.get("@id")
+                        &&let Some(prefix) = Self::extract_compact_iri_prefix(id)
+                    {
+                        used_prefixes.insert(prefix.to_string());
+                    }
+                    if let Some(serde_json::Value::String(t)) = obj.get("@type")
+                        && let Some(prefix) = Self::extract_compact_iri_prefix(t)
+                    {
+                        used_prefixes.insert(prefix.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for prefix in &used_prefixes {
+            if resolver.has_prefix(prefix) {
+                continue;
+            }
+            if let Some(val) = map.get(prefix.as_str())
+                && let Some(uri) = val.as_str()
+                && (uri.starts_with("http://") || uri.starts_with("https://"))
+            {
+                resolver.add_prefix(prefix, uri);
+            }
+        }
+    }
+
+    /// Extract the prefix part from a compact IRI (e.g., `"as"` from `"as:Note"`).
+    /// Returns `None` for full URIs (`http://...`) and keyword references (`@id`).
+    fn extract_compact_iri_prefix(value: &str) -> Option<&str> {
+        let (prefix, local) = value.split_once(':')?;
+        if local.starts_with("//") || prefix.starts_with('@') {
+            return None;
+        }
+        Some(prefix)
     }
 
     fn is_prefix_uri(uri: &str) -> bool {
@@ -111,8 +168,8 @@ impl ContextParser {
             });
         }
 
-        // Prefix declaration: value ends with # or /
-        if Self::is_prefix_uri(value) {
+        // Prefix declaration: URI ends with # or /, or detected as prefix via compact IRI usage
+        if Self::is_prefix_uri(value) || resolver.has_prefix(key) {
             return Some(TermDefinition {
                 name: key.to_string(),
                 kind: TermKind::Prefix {
