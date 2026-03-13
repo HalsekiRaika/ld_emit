@@ -1,5 +1,13 @@
 pub use serde;
-pub use serde_json;
+
+/// Re-export only the serde_json types used in the public API and generated code.
+///
+/// This intentionally does NOT re-export serde_json functions (`to_string`,
+/// `to_vec`, `to_value`, etc.) to avoid ambiguity with this crate's own
+/// serialization functions and to keep IDE type inference clean.
+pub mod serde_json {
+    pub use ::serde_json::{Error, Map, Number, Value};
+}
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -69,7 +77,7 @@ impl<Ctx: ContextSerializer> ObjectSerializer<Ctx> {
     }
 
     pub fn field(&mut self, key: &str, value: impl serde::Serialize) -> &mut Self {
-        if let Ok(v) = serde_json::to_value(value) {
+        if let Ok(v) = ::serde_json::to_value(value) {
             self.map.insert(key.to_string(), v);
         }
         self
@@ -164,12 +172,13 @@ pub trait LDSerializable {
 
 pub fn to_string<T: LDSerializable>(value: &T) -> Result<String, LDError> {
     let map = serialize_to_map(value)?;
-    serde_json::to_string(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
+    ::serde_json::to_string(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
 }
 
 pub fn to_string_pretty<T: LDSerializable>(value: &T) -> Result<String, LDError> {
     let map = serialize_to_map(value)?;
-    serde_json::to_string_pretty(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
+    ::serde_json::to_string_pretty(&serde_json::Value::Object(map))
+        .map_err(LDError::Serialization)
 }
 
 pub fn to_value<T: LDSerializable>(value: &T) -> Result<serde_json::Value, LDError> {
@@ -179,7 +188,7 @@ pub fn to_value<T: LDSerializable>(value: &T) -> Result<serde_json::Value, LDErr
 
 pub fn to_vec<T: LDSerializable>(value: &T) -> Result<Vec<u8>, LDError> {
     let map = serialize_to_map(value)?;
-    serde_json::to_vec(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
+    ::serde_json::to_vec(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
 }
 
 fn serialize_to_map<T: LDSerializable>(
@@ -249,6 +258,7 @@ macro_rules! include_ld {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::serde_json;
 
     // === LDError Tests ===
 

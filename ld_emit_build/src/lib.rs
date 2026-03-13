@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn ld_build_error_from_io() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let io_err = std::io::Error::other("test");
         let _err: LDBuildError = io_err.into();
     }
 
