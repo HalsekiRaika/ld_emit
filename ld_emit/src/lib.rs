@@ -177,6 +177,11 @@ pub fn to_value<T: LDSerializable>(value: &T) -> Result<serde_json::Value, LDErr
     Ok(serde_json::Value::Object(map))
 }
 
+pub fn to_vec<T: LDSerializable>(value: &T) -> Result<Vec<u8>, LDError> {
+    let map = serialize_to_map(value)?;
+    serde_json::to_vec(&serde_json::Value::Object(map)).map_err(LDError::Serialization)
+}
+
 fn serialize_to_map<T: LDSerializable>(
     value: &T,
 ) -> Result<serde_json::Map<String, serde_json::Value>, LDError> {
@@ -240,6 +245,7 @@ macro_rules! include_ld {
     };
 }
 
+// noinspection DuplicatedCode
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,7 +340,7 @@ mod tests {
         }
 
         // 外側のコンテキストが内側を合成する
-        struct Outer<S>(std::marker::PhantomData<S>);
+        struct Outer<S>(PhantomData<S>);
         impl<S: ContextSerializer> ContextSerializer for Outer<S> {
             fn context_json() -> serde_json::Value {
                 let mut arr = match S::context_json() {
@@ -723,6 +729,98 @@ mod tests {
             serde_json::json!(["https://www.w3.org/ns/activitystreams"])
         );
         assert_eq!(result["name"], serde_json::json!("Test Note"));
+    }
+
+    // === to_vec Tests ===
+
+    #[test]
+    fn to_vec_produces_valid_json_ld() {
+        struct TestCtx;
+        impl ContextSerializer for TestCtx {
+            fn context_json() -> serde_json::Value {
+                serde_json::json!(["https://www.w3.org/ns/activitystreams"])
+            }
+        }
+
+        struct MyNote;
+        impl LDSerializable for MyNote {
+            type Context = TestCtx;
+            fn ld_serialize(
+                &self,
+                serializer: &mut ObjectSerializer<Self::Context>,
+            ) -> Result<(), LDError> {
+                serializer.field("name", "Test Note");
+                Ok(())
+            }
+        }
+
+        let bytes = to_vec(&MyNote).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            parsed["@context"],
+            serde_json::json!(["https://www.w3.org/ns/activitystreams"])
+        );
+        assert_eq!(parsed["name"], serde_json::json!("Test Note"));
+    }
+
+    #[test]
+    fn to_vec_matches_to_string_output() {
+        struct MyType;
+        impl LDSerializable for MyType {
+            type Context = ();
+            fn ld_serialize(
+                &self,
+                serializer: &mut ObjectSerializer<Self::Context>,
+            ) -> Result<(), LDError> {
+                serializer.field("value", 42);
+                Ok(())
+            }
+        }
+
+        let string_result = to_string(&MyType).unwrap();
+        let vec_result = to_vec(&MyType).unwrap();
+        assert_eq!(string_result.as_bytes(), vec_result.as_slice());
+    }
+
+    #[test]
+    fn to_vec_with_type_def_and_nested() {
+        const NOTE_TYPE: TypeConstant = TypeConstant {
+            iri: "https://www.w3.org/ns/activitystreams#Note",
+            term_name: "Note",
+        };
+
+        struct TestCtx;
+        impl ContextSerializer for TestCtx {
+            fn context_json() -> serde_json::Value {
+                serde_json::json!("https://www.w3.org/ns/activitystreams")
+            }
+        }
+
+        struct MyNote;
+        impl LDSerializable for MyNote {
+            type Context = TestCtx;
+            fn ld_serialize(
+                &self,
+                serializer: &mut ObjectSerializer<Self::Context>,
+            ) -> Result<(), LDError> {
+                serializer
+                    .type_def(&[&NOTE_TYPE])
+                    .field("content", "Hello World")
+                    .nested_object("author", |child| {
+                        child.field("name", "Alice");
+                    });
+                Ok(())
+            }
+        }
+
+        let bytes = to_vec(&MyNote).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            parsed["@type"],
+            serde_json::json!("https://www.w3.org/ns/activitystreams#Note")
+        );
+        assert_eq!(parsed["content"], serde_json::json!("Hello World"));
+        assert_eq!(parsed["author"]["name"], serde_json::json!("Alice"));
     }
 
     // === flatten_context_array Tests ===
